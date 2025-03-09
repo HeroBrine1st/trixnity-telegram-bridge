@@ -1,0 +1,26 @@
+[versions]
+kotlin = "2.1.10"
+ktor = "3.0.3"
+trixnity-bridge = "0.1.0-1"
+
+[plugins]
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+ktor = { id = "io.ktor.plugin", version.ref = "ktor" }
+
+[libraries]
+trixnity-bridge-core = { module = "ru.herobrine1st.matrix:bridge", version.ref = "trixnity-bridge" }
+trixnity-bridge-compat = { module = "ru.herobrine1st.matrix:compat", version.ref = "trixnity-bridge" }
+trixnity-bridge-repository-doublepuppeted = { module = "ru.herobrine1st.matrix:generic-repository-doublepuppeted", version.ref = "trixnity-bridge" }
+
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
+ktor-server-callLogging = { module = "io.ktor:ktor-server-call-logging", version.ref = "ktor" }
+
+kotlinLogging = { module = "io.github.oshai:kotlin-logging", version = "7.0.3" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version = "2.0.7" }
+
+telegram-bot = { module = "io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram", version = "6.3.0" }
+
+r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql", version = "1.0.7.RELEASE" }
+r2dbc-pool = { module = "io.r2dbc:r2dbc-pool", version = "1.0.1.RELEASE" }
