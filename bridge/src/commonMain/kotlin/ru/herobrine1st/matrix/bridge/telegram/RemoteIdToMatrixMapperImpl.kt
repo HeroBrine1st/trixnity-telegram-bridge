@@ -11,11 +11,15 @@ class RemoteIdToMatrixMapperImpl(
     private val homeserverDomain: String
 ) : RemoteIdToMatrixMapper<ChatId, UserId> {
     override fun buildRoomAlias(remoteRoomId: ChatId): RoomAliasId {
-        TODO("Not yet implemented")
+        val suffix = when(remoteRoomId) {
+            is ChatId.ChannelUsername -> "c_${remoteRoomId.username}"
+            is ChatId.Id -> "i_${remoteRoomId.id}"
+        }
+        return RoomAliasId(localpart = roomAliasPrefix + suffix, domain = homeserverDomain)
     }
 
     override fun buildPuppetUserId(remoteUserId: UserId): net.folivo.trixnity.core.model.UserId {
-        TODO("Not yet implemented")
+        return net.folivo.trixnity.core.model.UserId(localpart = "$puppetPrefix${remoteUserId.id}", domain = homeserverDomain)
     }
 
     object Factory : RemoteIdToMatrixMapper.Factory<ChatId, UserId> {
