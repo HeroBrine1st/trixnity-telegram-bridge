@@ -4,7 +4,9 @@ import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import net.folivo.trixnity.core.model.events.ClientEvent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
 import ru.herobrine1st.matrix.bridge.api.RemoteRoom
@@ -38,7 +40,14 @@ class TelegramWorker(
         actorId: TelegramActorId,
         id: UserId
     ): RemoteUser<UserId> {
-        TODO("Not yet implemented")
+        val bot = getBot(actorId)
+        val chatId = ChatId.fromId(id.id)
+        val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).get() }
+        val displayName = chat.firstName ?: chat.username ?: "Unknown"
+        return RemoteUser(
+            remoteId = id,
+            displayName = displayName
+        )
     }
 
     override suspend fun getRoom(
