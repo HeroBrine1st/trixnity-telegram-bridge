@@ -1,5 +1,7 @@
 package ru.herobrine1st.matrix.bridge.telegram
 
+import com.github.kotlintelegrambot.Bot
+import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import kotlinx.coroutines.flow.Flow
@@ -51,6 +53,12 @@ class TelegramWorker(
         remoteId: ChatId
     ): Flow<Pair<UserId, RemoteUser<UserId>?>> {
         TODO("Not yet implemented")
+    }
+
+    private suspend fun getBot(actorId: TelegramActorId): Bot {
+        val actorData = actorProvisionRepository.getActorData(actorId)
+        val token = actorData.token
+        return bot { this.token = token }
     }
 
     class Factory(
