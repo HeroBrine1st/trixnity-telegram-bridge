@@ -34,6 +34,7 @@ class TelegramWorker(
 
     override fun getEvents(actorId: TelegramActorId): Flow<WorkerEvent<UserId, ChatId, MessageId>> {
         TODO("Not yet implemented")
+        this won't compile
     }
 
     override suspend fun getUser(
