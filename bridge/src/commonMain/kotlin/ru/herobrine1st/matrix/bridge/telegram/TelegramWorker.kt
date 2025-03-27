@@ -6,6 +6,7 @@ import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import net.folivo.trixnity.core.model.events.ClientEvent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
@@ -60,8 +61,19 @@ class TelegramWorker(
     override fun getRoomMembers(
         actorId: TelegramActorId,
         remoteId: ChatId
-    ): Flow<Pair<UserId, RemoteUser<UserId>?>> {
-        TODO("Not yet implemented")
+    ): Flow<Pair<UserId, RemoteUser<UserId>?>> = flow {
+        val bot = getBot(actorId)
+
+        // API Limitation: no access to full list
+        val members = withContext(Dispatchers.IO) {
+            bot.getChatAdministrators(remoteId).get()
+        }
+
+        for (member in members) {
+            val userId = UserId(member.user.id)
+            val remoteUser = RemoteUser(userId, member.user.firstName)
+            emit(userId to remoteUser)
+        }
     }
 
     private suspend fun getBot(actorId: TelegramActorId): Bot {
