@@ -55,7 +55,16 @@ class TelegramWorker(
         actorId: TelegramActorId,
         id: ChatId
     ): RemoteRoom<ChatId> {
-        TODO("Not yet implemented")
+        val bot = getBot(actorId)
+        val chat = withContext(Dispatchers.IO) { bot.getChat(id).get() }
+
+        check(chat.type != "channel") { "Can't create room for a channel" }
+
+        return RemoteRoom(
+            id = id,
+            isDirect = chat.type == "private",
+            displayName = chat.title
+        )
     }
 
     override fun getRoomMembers(
