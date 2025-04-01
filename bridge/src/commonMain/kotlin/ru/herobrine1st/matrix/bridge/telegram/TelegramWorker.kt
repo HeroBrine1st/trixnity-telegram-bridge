@@ -4,22 +4,19 @@ import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
+import com.github.kotlintelegrambot.types.TelegramBotResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import net.folivo.trixnity.core.model.events.ClientEvent
-import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
-import ru.herobrine1st.matrix.bridge.api.RemoteRoom
-import ru.herobrine1st.matrix.bridge.api.RemoteUser
-import ru.herobrine1st.matrix.bridge.api.RemoteWorker
-import ru.herobrine1st.matrix.bridge.api.RemoteWorkerAPI
-import ru.herobrine1st.matrix.bridge.api.RemoteWorkerFactory
-import ru.herobrine1st.matrix.bridge.api.WorkerEvent
+import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
+import ru.herobrine1st.matrix.bridge.api.*
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.telegram.value.UserId
+import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
@@ -30,7 +27,58 @@ class TelegramWorker(
         roomId: ChatId,
         event: ClientEvent.RoomEvent<*>
     ) {
-        TODO("Not yet implemented")
+        when (event) {
+            is ClientEvent.RoomEvent.MessageEvent<*> -> {
+                when (val content = event.content) {
+                    is RoomMessageEventContent -> {
+                        val textContent = when (content) {
+                            is RoomMessageEventContent.TextBased.Text -> content.body
+                            else -> throw UnhandledEventException(
+                                message = "This event is not delivered due to lack of support"
+                            )
+                        }
+
+                        val bot = getBot(actorId)
+                        val result = withContext(Dispatchers.IO) {
+                            bot.sendMessage(
+                                chatId = roomId,
+                                text = textContent
+                            )
+                        }
+
+                        when (result) {
+                            is TelegramBotResult.Success -> {
+                                linkMessageId(MessageId(result.value.messageId))
+                            }
+                            is TelegramBotResult.Error -> {
+                                val (message, cause) = when (result) {
+                                    is TelegramBotResult.Error.HttpError -> {
+                                        "HTTP error ${result.httpCode}: ${result.description ?: "No description"}" to null
+                                    }
+                                    is TelegramBotResult.Error.TelegramApi -> {
+                                        "Telegram API error ${result.errorCode}: ${result.description}" to null
+                                    }
+                                    is TelegramBotResult.Error.InvalidResponse -> {
+                                        "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage ?: "No status"}" to null
+                                    }
+                                    is TelegramBotResult.Error.Unknown -> {
+                                        "Unknown error: ${result.exception.message ?: "No details"}" to result.exception
+                                    }
+                                }
+                                throw UnhandledEventException(
+                                    message = "Failed to send message to Telegram: $message",
+                                    cause = cause
+                                )
+                            }
+                        }
+                    }
+                    else -> return // Пропускаем неподдерживаемые события
+                }
+            }
+            is ClientEvent.RoomEvent.StateEvent<*> -> {
+                return // TODO: Поддержка состояний в будущем
+            }
+        }
     }
 
     override fun getEvents(actorId: TelegramActorId): Flow<WorkerEvent<UserId, ChatId, MessageId>> {
