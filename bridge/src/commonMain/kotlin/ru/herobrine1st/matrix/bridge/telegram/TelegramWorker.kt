@@ -2,18 +2,26 @@ package ru.herobrine1st.matrix.bridge.telegram
 
 import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
+import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
+import com.github.kotlintelegrambot.entities.Update
 import com.github.kotlintelegrambot.types.TelegramBotResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.*
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
+import ru.herobrine1st.matrix.bridge.telegram.util.CallbackWrapper
+import ru.herobrine1st.matrix.bridge.telegram.util.ChannelCopyingHandler
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.telegram.value.UserId
@@ -39,7 +47,7 @@ class TelegramWorker(
                             )
                         }
 
-                        val bot = getBot(actorId)
+                        val (bot, _) = getBot(actorId)
                         val result = withContext(Dispatchers.IO) {
                             bot.sendMessage(
                                 chatId = roomId,
@@ -78,7 +86,7 @@ class TelegramWorker(
         actorId: TelegramActorId,
         id: UserId
     ): RemoteUser<UserId> {
-        val bot = getBot(actorId)
+        val (bot, _) = getBot(actorId)
         val chatId = ChatId.fromId(id.id)
         val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).get() }
         val displayName = chat.firstName ?: chat.username ?: "Unknown"
@@ -92,7 +100,7 @@ class TelegramWorker(
         actorId: TelegramActorId,
         id: ChatId
     ): RemoteRoom<ChatId> {
-        val bot = getBot(actorId)
+        val (bot, _) = getBot(actorId)
         val chat = withContext(Dispatchers.IO) { bot.getChat(id).get() }
 
         check(chat.type != "channel") { "Can't create room for a channel" }
@@ -108,7 +116,7 @@ class TelegramWorker(
         actorId: TelegramActorId,
         remoteId: ChatId
     ): Flow<Pair<UserId, RemoteUser<UserId>?>> = flow {
-        val bot = getBot(actorId)
+        val (bot, _) = getBot(actorId)
 
         // API Limitation: no access to full list
         val members = withContext(Dispatchers.IO) {
@@ -122,10 +130,39 @@ class TelegramWorker(
         }
     }
 
-    private suspend fun getBot(actorId: TelegramActorId): Bot {
-        val actorData = actorProvisionRepository.getActorData(actorId)
-        val token = actorData.token
-        return bot { this.token = token }
+    private val botCacheMutex = Mutex()
+    private val botCache = mutableMapOf<TelegramActorId, Pair<Bot, ReceiveChannel<CallbackWrapper<Update>>>>()
+
+
+    private suspend fun getBot(actorId: TelegramActorId): Pair<Bot, ReceiveChannel<CallbackWrapper<Update>>> {
+        botCache[actorId]?.let {
+            return it
+        }
+        return botCacheMutex.withLock {
+            val actorData = actorProvisionRepository.getActorData(actorId)
+            val eventChannel = Channel<CallbackWrapper<Update>>()
+            val bot = bot {
+                this.token = actorData.token
+                dispatch {
+                    addHandler(ChannelCopyingHandler(eventChannel))
+                }
+            }
+            // called when `getEvents` is complete, both due to error and actor removal
+            eventChannel.invokeOnClose {
+                // kotlin-telegram-bot uses OkHttp internally. Shutdown isn't necessary.
+                // https://square.github.io/okhttp/5.x/okhttp/okhttp3/-ok-http-client/index.html
+
+                // Remove bot as its actor is most probably deleted
+                // SAFETY: if `getEvents` is called concurrently to channel closing (which is not possible but not guaranteed),
+                //     it will crash and then restore, so race condition is automatically recovered from.
+                //     Bot is not shut down, so it can be used in fetcher methods
+                botCache.remove(actorId)
+            }
+            val res = bot to eventChannel
+            botCache.put(actorId, res)
+
+            return res
+        }
     }
 
     class Factory(
