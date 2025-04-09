@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.*
+import ru.herobrine1st.matrix.bridge.api.value.RemoteEventId
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
@@ -70,8 +71,57 @@ class TelegramWorker(
         }
     }
 
-    override fun getEvents(actorId: TelegramActorId): Flow<WorkerEvent<UserId, ChatId, MessageId>> {
-        TODO("Not yet implemented")
+    override fun getEvents(actorId: TelegramActorId): Flow<WorkerEvent<UserId, ChatId, MessageId>> = flow {
+        val bot = getBot(actorId)
+
+        var offset: Long? = null
+
+        while (true) {
+            val result = withContext(Dispatchers.IO) {
+                bot.getUpdates(
+                    limit = 100,
+                    offset = offset,
+                    timeout = 30
+                )
+            }
+
+            when (result) {
+                is TelegramBotResult.Success -> {
+                    if (result.value.isEmpty()) continue // Short-circuit empty responses
+                    result.value.forEach { update ->
+                        update.message?.let { message ->
+                            val (chat, sender, content) = run {
+                                message.text?.let { text ->
+                                    val sender = message.from!! // will likely throw exceptions, but docs say it is null only in channels
+                                    return@run Triple(message.chat, sender, RoomMessageEventContent.TextBased.Text(body = text))
+                                }
+                                return@forEach // TODO respond with unhandled event
+                            }
+
+                            val userId = UserId(sender.id)
+                            val messageId = MessageId(message.messageId)
+                            val chatId = ChatId.fromId(chat.id)
+
+                            emit(
+                                WorkerEvent.RemoteEvent(
+                                    RoomEvent.MessageEvent(
+                                        roomId = chatId,
+                                        eventId = RemoteEventId(update.updateId.toString()),
+                                        sender = userId,
+                                        content = content,
+                                        messageId = messageId
+                                    )
+                                )
+                            )
+                        }
+                    }
+                    offset = result.value.last().updateId + 1
+                }
+
+                is TelegramBotResult.Error.Unknown -> throw IOException("Failed to get updates from Telegram", result.exception)
+                is TelegramBotResult.Error -> throw IOException("Failed to get updates from Telegram: $result")
+            }
+        }
     }
 
     override suspend fun getUser(
