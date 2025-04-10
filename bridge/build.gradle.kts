@@ -10,6 +10,7 @@ tasks.shadowJar {
     manifest {
         attributes["Main-Class"] = "ru.herobrine1st.matrix.bridge.telegram.MainKt"
     }
+    mergeServiceFiles()
 }
 
 kotlin {
