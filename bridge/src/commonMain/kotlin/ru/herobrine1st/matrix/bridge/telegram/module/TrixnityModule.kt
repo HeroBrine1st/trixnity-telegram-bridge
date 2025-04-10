@@ -46,7 +46,7 @@ fun Application.trixnityModule() {
         bridgeConfig = BridgeConfig.fromConfig(environment.config.config("bridge"))
     )
 
-    monitor.subscribe(ApplicationStarting) {
+    monitor.subscribe(ApplicationStarted) {
         runBlocking {
             worker.createAppServiceBot()
         }
