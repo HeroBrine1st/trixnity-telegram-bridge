@@ -23,6 +23,7 @@ kotlin {
             implementation(libs.ktor.server.core)
             implementation(libs.ktor.server.callLogging)
 
+            implementation(libs.ktor.client.cio)
             implementation(libs.trixnity.bridge.core)
             implementation(libs.trixnity.bridge.compat)
             implementation(libs.kotlinLogging)
