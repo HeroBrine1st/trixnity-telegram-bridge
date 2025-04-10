@@ -4,6 +4,7 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.config.ApplicationConfig
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import net.folivo.trixnity.applicationserviceapi.server.matrixApplicationServiceApiServer
 import net.folivo.trixnity.applicationserviceapi.server.matrixApplicationServiceApiServerRoutes
@@ -15,6 +16,8 @@ import ru.herobrine1st.matrix.bridge.config.BridgeConfig.Provisioning
 import ru.herobrine1st.matrix.bridge.telegram.TelegramWorker
 import ru.herobrine1st.matrix.bridge.telegram.createRepository
 import ru.herobrine1st.matrix.bridge.telegram.RemoteIdToMatrixMapperImpl
+import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
+import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.worker.AppServiceWorker
 import ru.herobrine1st.matrix.compat.ServiceMembersContentSerializerMappings
 
@@ -46,6 +49,37 @@ fun Application.trixnityModule() {
     monitor.subscribe(ApplicationStarting) {
         runBlocking {
             worker.createAppServiceBot()
+        }
+        // TODO replace with AS bot commands
+        launch {
+            val configActors = environment.config.configList("telegram.actors")
+                .associate {
+                    Pair(
+                        TelegramActorId(it.property("id").getString().toLong()),
+                        TelegramActorData(token = it.property("token").getString())
+                    )
+                }
+            if (configActors.isEmpty()) return@launch
+            val dbActors = actorProvisionRepository.getAllActors()
+                .associate { (id, data) -> id to data }
+            // remove excess actors
+            (dbActors.keys - configActors.keys).forEach {
+                log.info("Removing actor $it as removed from configuration")
+                actorProvisionRepository.remoteActor(it)
+            }
+            // add actors from configuration
+            (configActors - dbActors.keys).forEach {(id, data) ->
+                log.info("Adding actor $it to database")
+                actorProvisionRepository.addActor(id, data)
+            }
+            // update existing actors
+            dbActors.keys.intersect(configActors.keys).forEach { id ->
+                // SAFETY: id is contained in both maps due to intersect
+                if(dbActors[id]!! != configActors[id]!!) {
+                    log.info("Updating actor $it")
+                    actorProvisionRepository.updateActor(id, configActors[id]!!)
+                }
+            }
         }
         worker.startup()
     }
