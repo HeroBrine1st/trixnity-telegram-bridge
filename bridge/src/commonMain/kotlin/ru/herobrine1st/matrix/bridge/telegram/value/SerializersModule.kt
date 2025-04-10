@@ -5,4 +5,5 @@ import kotlinx.serialization.modules.SerializersModule
 
 fun getRemoteActorSerializersModule() = SerializersModule {
     contextual(ChatIdSerializer())
+    contextual(MessageIdSerializer())
 }
