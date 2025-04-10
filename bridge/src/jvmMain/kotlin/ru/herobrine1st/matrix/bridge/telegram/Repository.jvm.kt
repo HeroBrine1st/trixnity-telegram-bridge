@@ -35,7 +35,7 @@ actual suspend fun ApplicationEnvironment.createRepository(): Pair<RepositorySet
         connectionFactory = ConnectionFactories.get(ConnectionFactoryOptions.builder().apply {
             option(DRIVER, POOLING_DRIVER)
             option(PROTOCOL, "postgresql")
-            with(config.config("tor.deployment.database")) {
+            with(config.config("ktor.deployment.database")) {
                 option(HOST, property("host").getString())
                 option(PORT, property("port").getString().toIntOrNull() ?: error("Database port invalid"))
                 option(USER, property("username").getString())
