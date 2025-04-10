@@ -1,12 +1,15 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ktor)
+    alias(libs.plugins.shadow)
 }
 
 
-application {
-    mainClass.set("ru.herobrine1st.matrix.bridge.telegram.MainKt")
+
+tasks.shadowJar {
+    manifest {
+        attributes["Main-Class"] = "ru.herobrine1st.matrix.bridge.telegram.MainKt"
+    }
 }
 
 kotlin {
