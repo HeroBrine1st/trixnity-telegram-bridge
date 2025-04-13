@@ -69,7 +69,7 @@ fun Application.trixnityModule() {
             }
             // add actors from configuration
             (configActors - dbActors.keys).forEach {(id, data) ->
-                log.info("Adding actor $it to database")
+                log.info("Adding actor $id to database")
                 actorProvisionRepository.addActor(id, data)
             }
             // update existing actors
