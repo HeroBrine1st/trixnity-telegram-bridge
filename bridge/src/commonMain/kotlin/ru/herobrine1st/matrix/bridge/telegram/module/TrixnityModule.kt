@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import net.folivo.trixnity.applicationserviceapi.server.matrixApplicationServiceApiServer
 import net.folivo.trixnity.applicationserviceapi.server.matrixApplicationServiceApiServerRoutes
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClientImpl
+import net.folivo.trixnity.core.model.UserId
 import net.folivo.trixnity.core.serialization.events.DefaultEventContentSerializerMappings
 import ru.herobrine1st.matrix.bridge.config.BridgeConfig
 import ru.herobrine1st.matrix.bridge.config.BridgeConfig.Presence
@@ -56,7 +57,7 @@ fun Application.trixnityModule() {
                 .associate {
                     Pair(
                         TelegramActorId(it.property("id").getString().toLong()),
-                        TelegramActorData(token = it.property("token").getString())
+                        TelegramActorData(token = it.property("token").getString(), admin = UserId(it.property("admin").getString()))
                     )
                 }
             if (configActors.isEmpty()) return@launch
