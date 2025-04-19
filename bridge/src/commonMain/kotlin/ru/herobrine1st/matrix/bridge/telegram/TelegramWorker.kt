@@ -13,8 +13,10 @@ import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.*
 import ru.herobrine1st.matrix.bridge.api.value.RemoteEventId
+import ru.herobrine1st.matrix.bridge.api.worker.BasicRemoteWorker
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
+import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.RemoteWorkerRepositorySet
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.telegram.value.UserId
@@ -23,7 +25,7 @@ import java.io.IOException
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
     private val api: RemoteWorkerAPI<UserId, ChatId, MessageId>
-) : RemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
+) : BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
     override suspend fun EventHandlerScope<MessageId>.handleEvent(
         actorId: TelegramActorId,
         roomId: ChatId,
@@ -71,7 +73,7 @@ class TelegramWorker(
         }
     }
 
-    override fun getEvents(actorId: TelegramActorId): Flow<WorkerEvent<UserId, ChatId, MessageId>> = flow {
+    override fun getEvents(actorId: TelegramActorId): Flow<BasicRemoteWorker.Event<UserId, ChatId, MessageId>> = flow {
         val bot = getBot(actorId)
 
         var offset: Long? = null
@@ -103,14 +105,12 @@ class TelegramWorker(
                             val chatId = ChatId.fromId(chat.id)
 
                             emit(
-                                WorkerEvent.RemoteEvent(
-                                    RoomEvent.MessageEvent(
-                                        roomId = chatId,
-                                        eventId = RemoteEventId(update.updateId.toString()),
-                                        sender = userId,
-                                        content = content,
-                                        messageId = messageId
-                                    )
+                                BasicRemoteWorker.Event.Remote.Room.Message(
+                                    roomId = chatId,
+                                    eventId = RemoteEventId(update.updateId.toString()),
+                                    sender = userId,
+                                    content = content,
+                                    messageId = messageId
                                 )
                             )
                         }
@@ -133,7 +133,7 @@ class TelegramWorker(
         val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).get() }
         val displayName = chat.firstName ?: chat.username ?: "Unknown"
         return RemoteUser(
-            remoteId = id,
+            id = id,
             displayName = displayName
         )
     }
@@ -141,16 +141,18 @@ class TelegramWorker(
     override suspend fun getRoom(
         actorId: TelegramActorId,
         id: ChatId
-    ): RemoteRoom<ChatId> {
+    ): RemoteRoom<UserId, ChatId> {
         val bot = getBot(actorId)
         val chat = withContext(Dispatchers.IO) { bot.getChat(id).get() }
 
         check(chat.type != "channel") { "Can't create room for a channel" }
+        check(chat.type != "private") { "Double puppeted bridge does not work with direct messages" }
 
         return RemoteRoom(
             id = id,
-            isDirect = chat.type == "private",
-            displayName = chat.title
+            directData = null,
+            displayName = chat.title,
+            realMembers = setOf(actorProvisionRepository.getActorData(actorId).admin)
         )
     }
 
@@ -179,12 +181,12 @@ class TelegramWorker(
     }
 
     class Factory(
-        private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>
-    ) : RemoteWorkerFactory<TelegramActorId, UserId, ChatId, MessageId> {
+        private val repositorySet: RemoteWorkerRepositorySet<TelegramActorId, TelegramActorData, UserId>
+    ) : BasicRemoteWorker.Factory<TelegramActorId, UserId, ChatId, MessageId> {
         override fun getRemoteWorker(
             api: RemoteWorkerAPI<UserId, ChatId, MessageId>
-        ): RemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
-            return TelegramWorker(actorProvisionRepository, api)
+        ): BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
+            return TelegramWorker(repositorySet.actorProvisionRepository, api)
         }
     }
 }
