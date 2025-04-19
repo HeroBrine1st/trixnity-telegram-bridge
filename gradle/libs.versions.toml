@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.1.10"
 ktor = "3.0.3"
-trixnity-bridge = "0.1.4"
+trixnity-bridge = "0.1.6"
 
 [plugins]
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
