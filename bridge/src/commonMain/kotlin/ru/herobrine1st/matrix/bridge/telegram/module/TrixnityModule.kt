@@ -25,7 +25,7 @@ import ru.herobrine1st.matrix.compat.ServiceMembersContentSerializerMappings
 fun Application.trixnityModule() {
     val mappings = DefaultEventContentSerializerMappings + ServiceMembersContentSerializerMappings
 
-    val (repositorySet, actorProvisionRepository) =
+    val (appServiceWorkerRepositorySet, remoteWorkerRepositorySet) =
         // currently no way to wait on something is available in Ktor, blocking launch instead
         // (though we can TODO postpone migration and at least configure server without runBlocking)
         runBlocking {
@@ -41,9 +41,9 @@ fun Application.trixnityModule() {
     val worker = AppServiceWorker(
         applicationJob = coroutineContext[Job]!!,
         client = mxClient,
-        remoteWorkerFactory = TelegramWorker.Factory(actorProvisionRepository),
-        repositorySet = repositorySet,
+        remoteWorkerFactory = TelegramWorker.Factory(remoteWorkerRepositorySet),
         idMapperFactory = RemoteIdToMatrixMapperImpl.Factory,
+        appServiceWorkerRepositorySet = appServiceWorkerRepositorySet,
         bridgeConfig = BridgeConfig.fromConfig(environment.config.config("bridge"))
     )
 
@@ -53,31 +53,32 @@ fun Application.trixnityModule() {
         }
         // TODO replace with AS bot commands
         launch {
+            val actorProvisionRepository = remoteWorkerRepositorySet.actorProvisionRepository
             val configActors = environment.config.configList("telegram.actors")
-                .associate {
+                .associate { entry ->
                     Pair(
-                        TelegramActorId(it.property("id").getString().toLong()),
-                        TelegramActorData(token = it.property("token").getString(), admin = UserId(it.property("admin").getString()))
+                        TelegramActorId(entry.property("id").getString().toLong()),
+                        TelegramActorData(token = entry.property("token").getString(), admin = UserId(entry.property("admin").getString()))
                     )
                 }
             if (configActors.isEmpty()) return@launch
             val dbActors = actorProvisionRepository.getAllActors()
                 .associate { (id, data) -> id to data }
             // remove excess actors
-            (dbActors.keys - configActors.keys).forEach {
-                log.info("Removing actor $it as removed from configuration")
-                actorProvisionRepository.remoteActor(it)
+            (dbActors.keys - configActors.keys).forEach { id ->
+                log.info("Removing actor $id as removed from configuration")
+                actorProvisionRepository.remoteActor(id)
             }
             // add actors from configuration
-            (configActors - dbActors.keys).forEach {(id, data) ->
+            (configActors - dbActors.keys).forEach { (id, data) ->
                 log.info("Adding actor $id to database")
                 actorProvisionRepository.addActor(id, data)
             }
             // update existing actors
             dbActors.keys.intersect(configActors.keys).forEach { id ->
                 // SAFETY: id is contained in both maps due to intersect
-                if(dbActors[id]!! != configActors[id]!!) {
-                    log.info("Updating actor $it")
+                if (dbActors[id]!! != configActors[id]!!) {
+                    log.info("Updating actor $id")
                     actorProvisionRepository.updateActor(id, configActors[id]!!)
                 }
             }

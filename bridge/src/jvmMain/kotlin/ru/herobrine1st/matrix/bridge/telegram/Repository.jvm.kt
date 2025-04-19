@@ -17,8 +17,8 @@ import io.r2dbc.spi.ConnectionFactoryOptions.PROTOCOL
 import io.r2dbc.spi.ConnectionFactoryOptions.USER
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.modules.plus
-import ru.herobrine1st.matrix.bridge.repository.RepositorySet
-import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
+import ru.herobrine1st.matrix.bridge.repository.AppServiceWorkerRepositorySet
+import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.RemoteWorkerRepositorySet
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.createR2DBCRepositorySet
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
@@ -27,7 +27,7 @@ import ru.herobrine1st.matrix.bridge.telegram.value.getRemoteActorSerializersMod
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.toJavaDuration
 
-actual suspend fun ApplicationEnvironment.createRepository(): Pair<RepositorySet<TelegramActorId, UserId, ChatId, MessageId>, ActorProvisionRepository<TelegramActorId, TelegramActorData>> {
+actual suspend fun ApplicationEnvironment.createRepository(): Pair<AppServiceWorkerRepositorySet<TelegramActorId, UserId, ChatId, MessageId>, RemoteWorkerRepositorySet<TelegramActorId, TelegramActorData, UserId>> {
     return createR2DBCRepositorySet<TelegramActorId, UserId, ChatId, MessageId, TelegramActorData>(
         stringFormat = Json {
             serializersModule = Json.serializersModule + getRemoteActorSerializersModule()
