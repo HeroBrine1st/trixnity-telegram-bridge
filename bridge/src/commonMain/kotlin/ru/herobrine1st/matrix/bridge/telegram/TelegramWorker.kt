@@ -4,12 +4,15 @@ import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
+import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.types.TelegramBotResult
+import io.ktor.utils.io.jvm.javaio.toInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
+import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
@@ -21,10 +24,14 @@ import ru.herobrine1st.matrix.bridge.api.worker.BasicRemoteWorker
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.RemoteWorkerRepositorySet
+import ru.herobrine1st.matrix.bridge.telegram.util.toResult
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.telegram.value.UserId
 import java.io.IOException
+import kotlin.io.path.createTempFile
+import kotlin.io.path.deleteIfExists
+import kotlin.io.path.outputStream
 
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
@@ -40,48 +47,91 @@ class TelegramWorker(
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
                 when (val content = event.content) {
                     is RoomMessageEventContent -> {
-                        val textContent = when (content) {
-                            is RoomMessageEventContent.TextBased.Text -> content.body
-                            else -> throw UnhandledEventException(
-                                message = "This event is not delivered due to lack of support",
-                            )
-                        }
-
                         val bot = getBot(actorId)
-                        val result = withContext(Dispatchers.IO) {
-                            bot.sendMessage(
-                                chatId = roomId,
-                                text = "<${event.sender}>: $textContent",
-                            )
-                        }
+                        val result = when (content) {
+                            is RoomMessageEventContent.TextBased.Text -> {
+                                val textContent = content.body
 
+                                withContext(Dispatchers.IO) {
+                                    bot.sendMessage(
+                                        chatId = roomId,
+                                        text = "<${event.sender}>: $textContent",
+                                    )
+                                }
+                            }
+
+                            is RoomMessageEventContent.FileBased.Image -> {
+                                val caption = when {
+                                    content.fileName == null || content.fileName == content.body ->
+                                        "${event.sender} sent a picture"
+
+                                    else -> "${event.sender}: ${content.body}"
+                                }
+
+                                downloadMatrixMedia(content.url!!) { photoFile ->
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendPhoto(
+                                            chatId = roomId,
+                                            photo = photoFile,
+                                            caption = caption,
+                                        )
+                                    }.toResult()
+                                }
+                            }
+
+                            else -> {
+                                throw UnhandledEventException("This event is not delivered due to lack of support")
+                            }
+                        }
                         when (result) {
                             is TelegramBotResult.Success -> {
                                 linkMessageId(MessageId(result.value.messageId))
                             }
+
                             is TelegramBotResult.Error -> {
                                 when (result) {
                                     is TelegramBotResult.Error.HttpError -> throw IOException(
                                         "HTTP error ${result.httpCode}: ${result.description}",
                                     )
+
                                     is TelegramBotResult.Error.TelegramApi -> error(
                                         "Telegram API error ${result.errorCode}: ${result.description}",
                                     )
+
                                     is TelegramBotResult.Error.InvalidResponse -> throw IOException(
                                         "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}",
                                     )
+
                                     is TelegramBotResult.Error.Unknown -> throw result.exception
                                 }
                             }
                         }
                     }
+
                     else -> return
                 }
             }
+
             is ClientEvent.RoomEvent.StateEvent<*> -> {
                 return // TODO: Support for future states
             }
         }
+    }
+
+    private suspend inline fun <T> downloadMatrixMedia(url: String, crossinline block: suspend (TelegramFile) -> T): T {
+        return client.media.download(url) { media: Media ->
+            val tempFile = createTempFile()
+            try {
+                withContext(Dispatchers.IO) {
+                    tempFile.outputStream().use { outputStream ->
+                        media.content.toInputStream().transferTo(outputStream)
+                    }
+                }
+                block(TelegramFile.ByFile(tempFile.toFile()))
+            } finally {
+                tempFile.deleteIfExists()
+            }
+        }.getOrThrow()
     }
 
     override fun getEvents(actorId: TelegramActorId): Flow<BasicRemoteWorker.Event<UserId, ChatId, MessageId>> = flow {
@@ -138,6 +188,7 @@ class TelegramWorker(
                     "Failed to get updates from Telegram",
                     result.exception,
                 )
+
                 is TelegramBotResult.Error -> throw IOException("Failed to get updates from Telegram: $result")
             }
         }
