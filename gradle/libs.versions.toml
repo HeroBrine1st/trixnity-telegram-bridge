@@ -7,6 +7,7 @@ trixnity-bridge = "0.1.6"
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 shadow = { id = "com.gradleup.shadow", version = "9.0.0-beta12" }
+spotless = { id = "com.diffplug.spotless", version = "7.0.3" }
 
 [libraries]
 trixnity-bridge-core = { module = "ru.herobrine1st.matrix:bridge", version.ref = "trixnity-bridge" }
