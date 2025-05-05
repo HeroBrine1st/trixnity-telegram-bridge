@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.*
@@ -24,7 +25,8 @@ import java.io.IOException
 
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
-    private val api: RemoteWorkerAPI<UserId, ChatId, MessageId>
+    private val api: RemoteWorkerAPI<UserId, ChatId, MessageId>,
+    private val client: MatrixClientServerApiClient
 ) : BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
     override suspend fun EventHandlerScope<MessageId>.handleEvent(
         actorId: TelegramActorId,
@@ -181,12 +183,13 @@ class TelegramWorker(
     }
 
     class Factory(
-        private val repositorySet: RemoteWorkerRepositorySet<TelegramActorId, TelegramActorData, UserId>
+        private val repositorySet: RemoteWorkerRepositorySet<TelegramActorId, TelegramActorData, UserId>,
+        private val client: MatrixClientServerApiClient
     ) : BasicRemoteWorker.Factory<TelegramActorId, UserId, ChatId, MessageId> {
         override fun getRemoteWorker(
             api: RemoteWorkerAPI<UserId, ChatId, MessageId>
         ): BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
-            return TelegramWorker(repositorySet.actorProvisionRepository, api)
+            return TelegramWorker(repositorySet.actorProvisionRepository, api, client)
         }
     }
 }

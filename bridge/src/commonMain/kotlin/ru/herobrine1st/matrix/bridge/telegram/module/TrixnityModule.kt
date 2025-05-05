@@ -41,7 +41,7 @@ fun Application.trixnityModule() {
     val worker = AppServiceWorker(
         applicationJob = coroutineContext[Job]!!,
         client = mxClient,
-        remoteWorkerFactory = TelegramWorker.Factory(remoteWorkerRepositorySet),
+        remoteWorkerFactory = TelegramWorker.Factory(remoteWorkerRepositorySet, mxClient),
         idMapperFactory = RemoteIdToMatrixMapperImpl.Factory,
         appServiceWorkerRepositorySet = appServiceWorkerRepositorySet,
         bridgeConfig = BridgeConfig.fromConfig(environment.config.config("bridge"))
