@@ -1,7 +1,9 @@
 package ru.herobrine1st.matrix.bridge.telegram.module
 
-import io.ktor.http.*
-import io.ktor.server.application.*
+import io.ktor.http.Url
+import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStarted
+import io.ktor.server.application.log
 import io.ktor.server.config.ApplicationConfig
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -14,9 +16,9 @@ import net.folivo.trixnity.core.serialization.events.DefaultEventContentSerializ
 import ru.herobrine1st.matrix.bridge.config.BridgeConfig
 import ru.herobrine1st.matrix.bridge.config.BridgeConfig.Presence
 import ru.herobrine1st.matrix.bridge.config.BridgeConfig.Provisioning
+import ru.herobrine1st.matrix.bridge.telegram.RemoteIdToMatrixMapperImpl
 import ru.herobrine1st.matrix.bridge.telegram.TelegramWorker
 import ru.herobrine1st.matrix.bridge.telegram.createRepository
-import ru.herobrine1st.matrix.bridge.telegram.RemoteIdToMatrixMapperImpl
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.worker.AppServiceWorker
@@ -33,7 +35,7 @@ fun Application.trixnityModule() {
         }
     val mxClient = MatrixClientServerApiClientImpl(
         baseUrl = Url(environment.config.property("ktor.deployment.homeserverUrl").getString()),
-        eventContentSerializerMappings = mappings
+        eventContentSerializerMappings = mappings,
     ).apply {
         accessToken.value = environment.config.property("ktor.deployment.asToken").getString()
     }
@@ -44,7 +46,7 @@ fun Application.trixnityModule() {
         remoteWorkerFactory = TelegramWorker.Factory(remoteWorkerRepositorySet, mxClient),
         idMapperFactory = RemoteIdToMatrixMapperImpl.Factory,
         appServiceWorkerRepositorySet = appServiceWorkerRepositorySet,
-        bridgeConfig = BridgeConfig.fromConfig(environment.config.config("bridge"))
+        bridgeConfig = BridgeConfig.fromConfig(environment.config.config("bridge")),
     )
 
     monitor.subscribe(ApplicationStarted) {
@@ -58,7 +60,10 @@ fun Application.trixnityModule() {
                 .associate { entry ->
                     Pair(
                         TelegramActorId(entry.property("id").getString().toLong()),
-                        TelegramActorData(token = entry.property("token").getString(), admin = UserId(entry.property("admin").getString()))
+                        TelegramActorData(
+                            token = entry.property("token").getString(),
+                            admin = UserId(entry.property("admin").getString()),
+                        ),
                     )
                 }
             if (configActors.isEmpty()) return@launch
@@ -89,7 +94,7 @@ fun Application.trixnityModule() {
     matrixApplicationServiceApiServer(environment.config.property("ktor.deployment.hsToken").getString()) {
         matrixApplicationServiceApiServerRoutes(
             worker,
-            eventContentSerializerMappings = mappings
+            eventContentSerializerMappings = mappings,
         )
     }
 }
@@ -106,10 +111,10 @@ fun BridgeConfig.Companion.fromConfig(config: ApplicationConfig) = BridgeConfig(
         },
         blacklist = config.property("provisioning.blacklist").getList().map {
             Regex(it)
-        }
+        },
     ),
     presence = Presence(
         remote = config.property("presence.remote").getString().toBoolean(),
-        local = config.property("presence.local").getString().toBoolean()
-    )
+        local = config.property("presence.local").getString().toBoolean(),
+    ),
 )

@@ -12,7 +12,10 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
-import ru.herobrine1st.matrix.bridge.api.*
+import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
+import ru.herobrine1st.matrix.bridge.api.RemoteRoom
+import ru.herobrine1st.matrix.bridge.api.RemoteUser
+import ru.herobrine1st.matrix.bridge.api.RemoteWorkerAPI
 import ru.herobrine1st.matrix.bridge.api.value.RemoteEventId
 import ru.herobrine1st.matrix.bridge.api.worker.BasicRemoteWorker
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
@@ -26,12 +29,12 @@ import java.io.IOException
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
     private val api: RemoteWorkerAPI<UserId, ChatId, MessageId>,
-    private val client: MatrixClientServerApiClient
+    private val client: MatrixClientServerApiClient,
 ) : BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
     override suspend fun EventHandlerScope<MessageId>.handleEvent(
         actorId: TelegramActorId,
         roomId: ChatId,
-        event: ClientEvent.RoomEvent<*>
+        event: ClientEvent.RoomEvent<*>,
     ) {
         when (event) {
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
@@ -40,7 +43,7 @@ class TelegramWorker(
                         val textContent = when (content) {
                             is RoomMessageEventContent.TextBased.Text -> content.body
                             else -> throw UnhandledEventException(
-                                message = "This event is not delivered due to lack of support"
+                                message = "This event is not delivered due to lack of support",
                             )
                         }
 
@@ -48,7 +51,7 @@ class TelegramWorker(
                         val result = withContext(Dispatchers.IO) {
                             bot.sendMessage(
                                 chatId = roomId,
-                                text = "<${event.sender}>: $textContent"
+                                text = "<${event.sender}>: $textContent",
                             )
                         }
 
@@ -58,9 +61,15 @@ class TelegramWorker(
                             }
                             is TelegramBotResult.Error -> {
                                 when (result) {
-                                    is TelegramBotResult.Error.HttpError -> throw IOException("HTTP error ${result.httpCode}: ${result.description}")
-                                    is TelegramBotResult.Error.TelegramApi -> error("Telegram API error ${result.errorCode}: ${result.description}")
-                                    is TelegramBotResult.Error.InvalidResponse -> throw IOException("Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}")
+                                    is TelegramBotResult.Error.HttpError -> throw IOException(
+                                        "HTTP error ${result.httpCode}: ${result.description}",
+                                    )
+                                    is TelegramBotResult.Error.TelegramApi -> error(
+                                        "Telegram API error ${result.errorCode}: ${result.description}",
+                                    )
+                                    is TelegramBotResult.Error.InvalidResponse -> throw IOException(
+                                        "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}",
+                                    )
                                     is TelegramBotResult.Error.Unknown -> throw result.exception
                                 }
                             }
@@ -85,7 +94,7 @@ class TelegramWorker(
                 bot.getUpdates(
                     limit = 100,
                     offset = offset,
-                    timeout = 30
+                    timeout = 30,
                 )
             }
 
@@ -96,8 +105,13 @@ class TelegramWorker(
                         update.message?.let { message ->
                             val (chat, sender, content) = run {
                                 message.text?.let { text ->
-                                    val sender = message.from!! // will likely throw exceptions, but docs say it is null only in channels
-                                    return@run Triple(message.chat, sender, RoomMessageEventContent.TextBased.Text(body = text))
+                                    // will likely throw exceptions, but docs say it is null only in channels
+                                    val sender = message.from!!
+                                    return@run Triple(
+                                        message.chat,
+                                        sender,
+                                        RoomMessageEventContent.TextBased.Text(body = text),
+                                    )
                                 }
                                 return@forEach // TODO respond with unhandled event
                             }
@@ -112,38 +126,35 @@ class TelegramWorker(
                                     eventId = RemoteEventId(update.updateId.toString()),
                                     sender = userId,
                                     content = content,
-                                    messageId = messageId
-                                )
+                                    messageId = messageId,
+                                ),
                             )
                         }
                     }
                     offset = result.value.last().updateId + 1
                 }
 
-                is TelegramBotResult.Error.Unknown -> throw IOException("Failed to get updates from Telegram", result.exception)
+                is TelegramBotResult.Error.Unknown -> throw IOException(
+                    "Failed to get updates from Telegram",
+                    result.exception,
+                )
                 is TelegramBotResult.Error -> throw IOException("Failed to get updates from Telegram: $result")
             }
         }
     }
 
-    override suspend fun getUser(
-        actorId: TelegramActorId,
-        id: UserId
-    ): RemoteUser<UserId> {
+    override suspend fun getUser(actorId: TelegramActorId, id: UserId): RemoteUser<UserId> {
         val bot = getBot(actorId)
         val chatId = ChatId.fromId(id.id)
         val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).get() }
         val displayName = chat.firstName ?: chat.username ?: "Unknown"
         return RemoteUser(
             id = id,
-            displayName = displayName
+            displayName = displayName,
         )
     }
 
-    override suspend fun getRoom(
-        actorId: TelegramActorId,
-        id: ChatId
-    ): RemoteRoom<UserId, ChatId> {
+    override suspend fun getRoom(actorId: TelegramActorId, id: ChatId): RemoteRoom<UserId, ChatId> {
         val bot = getBot(actorId)
         val chat = withContext(Dispatchers.IO) { bot.getChat(id).get() }
 
@@ -154,14 +165,11 @@ class TelegramWorker(
             id = id,
             directData = null,
             displayName = chat.title,
-            realMembers = setOf(actorProvisionRepository.getActorData(actorId).admin)
+            realMembers = setOf(actorProvisionRepository.getActorData(actorId).admin),
         )
     }
 
-    override fun getRoomMembers(
-        actorId: TelegramActorId,
-        remoteId: ChatId
-    ): Flow<Pair<UserId, RemoteUser<UserId>?>> = flow {
+    override fun getRoomMembers(actorId: TelegramActorId, remoteId: ChatId) = flow {
         val bot = getBot(actorId)
 
         // API Limitation: no access to full list
@@ -184,12 +192,11 @@ class TelegramWorker(
 
     class Factory(
         private val repositorySet: RemoteWorkerRepositorySet<TelegramActorId, TelegramActorData, UserId>,
-        private val client: MatrixClientServerApiClient
+        private val client: MatrixClientServerApiClient,
     ) : BasicRemoteWorker.Factory<TelegramActorId, UserId, ChatId, MessageId> {
         override fun getRemoteWorker(
-            api: RemoteWorkerAPI<UserId, ChatId, MessageId>
-        ): BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> {
-            return TelegramWorker(repositorySet.actorProvisionRepository, api, client)
-        }
+            api: RemoteWorkerAPI<UserId, ChatId, MessageId>,
+        ): BasicRemoteWorker<TelegramActorId, UserId, ChatId, MessageId> =
+            TelegramWorker(repositorySet.actorProvisionRepository, api, client)
     }
 }

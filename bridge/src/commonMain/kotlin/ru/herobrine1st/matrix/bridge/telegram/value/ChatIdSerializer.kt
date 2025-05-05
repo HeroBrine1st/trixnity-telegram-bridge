@@ -2,9 +2,9 @@ package ru.herobrine1st.matrix.bridge.telegram.value
 
 import com.github.kotlintelegrambot.entities.ChatId
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.descriptors.element
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.encoding.decodeStructure
@@ -17,10 +17,7 @@ class ChatIdSerializer : KSerializer<ChatId> {
             element<String>("channelUsername")
         }
 
-    override fun serialize(
-        encoder: Encoder,
-        value: ChatId
-    ) {
+    override fun serialize(encoder: Encoder, value: ChatId) {
         encoder.encodeStructure(descriptor) {
             when (value) {
                 is ChatId.Id -> encodeLongElement(descriptor, 0, value.id)
@@ -30,11 +27,10 @@ class ChatIdSerializer : KSerializer<ChatId> {
     }
 
     override fun deserialize(decoder: Decoder) = decoder.decodeStructure(descriptor) {
-        when(val index = decodeElementIndex(descriptor)) {
+        when (val index = decodeElementIndex(descriptor)) {
             0 -> ChatId.Id(decodeLongElement(descriptor, 0))
             1 -> ChatId.ChannelUsername(decodeStringElement(descriptor, 1))
             else -> error("Unexpected index $index")
         }
     }
-
 }
