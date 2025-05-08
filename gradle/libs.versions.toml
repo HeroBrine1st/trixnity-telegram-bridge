@@ -2,6 +2,7 @@
 kotlin = "2.1.10"
 ktor = "3.0.3"
 trixnity-bridge = "0.1.6"
+retrofit = "2.9.0"
 
 [plugins]
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
@@ -26,3 +27,5 @@ telegram-bot = { module = "io.github.kotlin-telegram-bot.kotlin-telegram-bot:tel
 
 r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql", version = "1.0.7.RELEASE" }
 r2dbc-pool = { module = "io.r2dbc:r2dbc-pool", version = "1.0.1.RELEASE" }
+retrofit-core = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
+retrofit-converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }
