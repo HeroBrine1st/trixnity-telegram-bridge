@@ -28,6 +28,10 @@ kotlin {
             implementation(libs.trixnity.bridge.compat)
             implementation(libs.kotlinLogging)
             implementation(libs.telegram.bot)
+
+            // for some reason Retrofit is not a transitive dependency and not included in classpath
+            implementation(libs.retrofit.core)
+            implementation(libs.retrofit.converter.gson)
         }
         jvmMain.dependencies {
             implementation(libs.trixnity.bridge.repository.doublepuppeted)
