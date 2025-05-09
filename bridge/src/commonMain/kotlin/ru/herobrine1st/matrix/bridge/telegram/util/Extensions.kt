@@ -9,46 +9,36 @@ import com.google.gson.reflect.TypeToken
 import com.google.gson.stream.JsonToken
 
 fun <T : Any> Pair<retrofit2.Response<Response<T>?>?, Exception?>.toResult(): TelegramBotResult<T> {
+    return when (val res = toResult<Response<T>>()) {
+        is TelegramBotResult.Error -> res
+        is TelegramBotResult.Success -> TelegramBotResult.Success(res.value.result!!)
+    }
+}
+
+@JvmName("toGenericResult")
+fun <T : Any> Pair<retrofit2.Response<T?>?, Exception?>.toResult(): TelegramBotResult<T> {
     second?.let { return TelegramBotResult.Error.Unknown(it) }
     val apiResponse = first!!
 
-    // Null if malformed
-    val responseBody = if (apiResponse.isSuccessful) {
-        apiResponse.body()
-    } else {
+    // SAFETY: Internally isSuccessful=true means body() is not null and isSuccessful=false means errorBody() is not null
+    // No guarantees are given though
+    // So, an exception is thrown in case this contract is not fulfilled.
+    if (!apiResponse.isSuccessful) {
         // Adapter from retrofit-converter-gson
-        apiResponse.errorBody()?.use { body ->
+        apiResponse.errorBody()!!.use { body ->
             val gson = Gson()
             val jsonReader = gson.newJsonReader(body.charStream())
-            val adapter: TypeAdapter<Response<T>> = gson.getAdapter(object : TypeToken<Response<T>>() {})
+            val adapter: TypeAdapter<Response<Nothing>> = gson.getAdapter(object : TypeToken<Response<Nothing>>() {})
             val result = adapter.read(jsonReader)
             if (jsonReader.peek() != JsonToken.END_DOCUMENT) {
                 return TelegramBotResult.Error.Unknown(JsonIOException("JSON document was not fully consumed."))
             }
-            result
+            return TelegramBotResult.Error.TelegramApi(
+                errorCode = result.errorCode!!,
+                description = result.errorDescription!!,
+            )
         }
     }
 
-    return responseBody
-        ?.takeIf {
-            when {
-                // Take if successful
-                it.ok -> true
-                // Return early on error
-                else -> return@toResult TelegramBotResult.Error.TelegramApi(
-                    // Don't take if malformed
-                    errorCode = it.errorCode ?: return@takeIf false,
-                    description = it.errorDescription ?: return@takeIf false,
-                )
-            }
-        }
-        ?.result?.let {
-            TelegramBotResult.Success(it)
-        }
-        // Handle malformed responses
-        ?: TelegramBotResult.Error.InvalidResponse(
-            apiResponse.code(),
-            apiResponse.message(),
-            apiResponse.body(),
-        )
+    return TelegramBotResult.Success(apiResponse.body()!!)
 }
