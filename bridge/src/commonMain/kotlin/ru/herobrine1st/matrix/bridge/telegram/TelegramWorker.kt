@@ -29,8 +29,9 @@ import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
 import ru.herobrine1st.matrix.bridge.telegram.value.UserId
 import java.io.IOException
-import kotlin.io.path.createTempFile
-import kotlin.io.path.deleteIfExists
+import kotlin.io.path.ExperimentalPathApi
+import kotlin.io.path.createTempDirectory
+import kotlin.io.path.deleteRecursively
 import kotlin.io.path.outputStream
 
 class TelegramWorker(
@@ -82,6 +83,30 @@ class TelegramWorker(
                                 }
                             }
 
+                            is RoomMessageEventContent.FileBased.File -> {
+                                val caption = when {
+                                    content.fileName == null || content.fileName == content.body ->
+                                        "${event.sender} sent a file"
+
+                                    else -> "${event.sender}: ${content.body}"
+                                }
+
+                                val url = content.url ?: return
+                                val fileName = (content.fileName ?: content.body).take(255)
+                                    .replace('/', '_')
+                                    .replace('\\', '_')
+
+                                downloadMatrixMedia(url, fileName) { file ->
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendDocument(
+                                            chatId = roomId,
+                                            document = file,
+                                            caption = caption,
+                                        )
+                                    }.toResult()
+                                }
+                            }
+
                             else -> {
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
                             }
@@ -121,9 +146,14 @@ class TelegramWorker(
         }
     }
 
-    private suspend inline fun <T> downloadMatrixMedia(url: String, crossinline block: suspend (TelegramFile) -> T): T {
+    @OptIn(ExperimentalPathApi::class)
+    private suspend inline fun <T> downloadMatrixMedia(
+        url: String,
+        fileName: String = "file.tmp",
+        crossinline block: suspend (TelegramFile) -> T,
+    ): T {
         return client.media.download(url) { media: Media ->
-            val tempFile = createTempFile()
+            val tempFile = createTempDirectory().resolve(fileName)
             try {
                 withContext(Dispatchers.IO) {
                     tempFile.outputStream().use { outputStream ->
@@ -132,7 +162,7 @@ class TelegramWorker(
                 }
                 block(TelegramFile.ByFile(tempFile.toFile()))
             } finally {
-                tempFile.deleteIfExists()
+                tempFile.parent.deleteRecursively()
             }
         }.getOrThrow()
     }
