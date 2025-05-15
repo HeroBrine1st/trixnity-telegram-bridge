@@ -68,7 +68,10 @@ class TelegramWorker(
                                     else -> "${event.sender}: ${content.body}"
                                 }
 
-                                downloadMatrixMedia(content.url!!) { photoFile ->
+                                // encrypted or malformed if null
+                                val url = content.url ?: return
+
+                                downloadMatrixMedia(url) { photoFile ->
                                     withContext(Dispatchers.IO) {
                                         bot.sendPhoto(
                                             chatId = roomId,
