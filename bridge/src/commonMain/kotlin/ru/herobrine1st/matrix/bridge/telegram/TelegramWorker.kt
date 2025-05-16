@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
+import net.folivo.trixnity.core.model.events.m.RelatesTo
 import net.folivo.trixnity.core.model.events.m.room.FileInfo
 import net.folivo.trixnity.core.model.events.m.room.ImageInfo
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
@@ -52,11 +53,73 @@ class TelegramWorker(
     ) {
         when (event) {
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
-                when (val content = event.content) {
+                when (val contentRaw = event.content) {
                     is RoomMessageEventContent -> {
+                        val replacement = (contentRaw.relatesTo as? RelatesTo.Replace)?.let {
+                            val messageId = api.getMessageEventId(it.eventId) ?: return@let null
+
+                            val originalEvent = client.room.getEvent(event.roomId, it.eventId).getOrThrow()
+                            val originalContent = originalEvent.content
+                            if (originalContent !is RoomMessageEventContent) {
+                                throw UnhandledEventException(
+                                    "The edited event (${it.eventId}) is likely not known to database",
+                                )
+                            }
+
+                            val newContent = it.newContent
+
+                            if (newContent !is RoomMessageEventContent) {
+                                throw UnhandledEventException(
+                                    "The bridge does not support this event because it is not room message event: $newContent",
+                                )
+                            }
+
+                            @Suppress("ktlint:standard:max-line-length")
+                            val isTheSame = when (originalContent) {
+                                // avoid reflection at all costs
+                                is RoomMessageEventContent.FileBased.Audio -> newContent is RoomMessageEventContent.FileBased.Audio
+                                is RoomMessageEventContent.FileBased.File -> newContent is RoomMessageEventContent.FileBased.File
+                                is RoomMessageEventContent.FileBased.Image -> newContent is RoomMessageEventContent.FileBased.Image
+                                is RoomMessageEventContent.FileBased.Video -> newContent is RoomMessageEventContent.FileBased.Video
+                                is RoomMessageEventContent.TextBased.Emote -> newContent is RoomMessageEventContent.TextBased.Emote
+                                is RoomMessageEventContent.TextBased.Notice -> newContent is RoomMessageEventContent.TextBased.Notice
+                                is RoomMessageEventContent.TextBased.Text -> newContent is RoomMessageEventContent.TextBased.Text
+                                is RoomMessageEventContent.Location -> newContent is RoomMessageEventContent.Location
+                                // are not supported
+                                is RoomMessageEventContent.Unknown -> return
+                                is RoomMessageEventContent.VerificationRequest -> return
+                            }
+
+                            if (!isTheSame) {
+                                throw UnhandledEventException(
+                                    "This event replacement is not sent because Telegram does not support changing message types",
+                                )
+                            }
+
+                            Pair(
+                                messageId,
+                                newContent,
+                                // Previous replacement can be fetched to optimise caption-only replacements performance
+                                // but trixnity requires `from` token although it is not needed
+                                // spec.matrix.org/v1.14/client-server-api/#get_matrixclientv1roomsroomidrelationseventidreltype
+                            )
+                        }
+
+                        val content = replacement?.second ?: contentRaw
+
                         val bot = getBot(actorId)
 
                         when (content) {
+                            is RoomMessageEventContent.TextBased.Text if replacement != null -> withContext(
+                                Dispatchers.IO,
+                            ) {
+                                bot.editMessageText(
+                                    chatId = roomId,
+                                    messageId = replacement.first.messageId,
+                                    text = "<${event.sender}>: ${content.body}",
+                                ).toResult()
+                            }.ignoreTheSameContentOrThrow()
+
                             is RoomMessageEventContent.TextBased.Text -> {
                                 val textContent = content.body
 
@@ -358,6 +421,17 @@ class TelegramWorker(
         val actorData = actorProvisionRepository.getActorData(actorId)
         val token = actorData.token
         return bot { this.token = token }
+    }
+
+    private fun TelegramBotResult<*>.ignoreTheSameContentOrThrow() {
+        if (this !is TelegramBotResult.Error.TelegramApi ||
+            errorCode != 400 ||
+            description != "Bad Request: message is not modified: " +
+            "specified new message content and reply markup are exactly the same " +
+            "as a current content and reply markup of the message"
+        ) {
+            getOrThrow()
+        }
     }
 
     class Factory(
