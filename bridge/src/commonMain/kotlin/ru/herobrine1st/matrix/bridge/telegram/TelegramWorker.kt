@@ -14,6 +14,8 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
+import net.folivo.trixnity.core.model.events.m.RelatesTo
+import net.folivo.trixnity.core.model.events.m.RelationType
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
 import ru.herobrine1st.matrix.bridge.api.RemoteRoom
@@ -46,97 +48,118 @@ class TelegramWorker(
     ) {
         when (event) {
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
-                when (val content = event.content) {
-                    is RoomMessageEventContent -> {
-                        val bot = getBot(actorId)
-                        val result = when (content) {
-                            is RoomMessageEventContent.TextBased.Text -> {
-                                val textContent = content.body
+                val contentRaw = event.content
+                if (contentRaw !is RoomMessageEventContent) return
 
-                                withContext(Dispatchers.IO) {
-                                    bot.sendMessage(
-                                        chatId = roomId,
-                                        text = "<${event.sender}>: $textContent",
-                                    )
-                                }
+                val relatesTo = contentRaw.relatesTo
+
+                if (relatesTo?.relationType == RelationType.Thread) {
+                    return
+                }
+
+                val editedTelegramMessageId = when (relatesTo) {
+                    is RelatesTo.Replace -> api.getMessageEventId(relatesTo.eventId)
+                    else -> null
+                }
+
+                val content: RoomMessageEventContent = contentRaw
+
+                val bot = getBot(actorId)
+
+                val result = when (content) {
+                    is RoomMessageEventContent.TextBased.Text -> {
+                        val textContent = content.body
+
+                        if (editedTelegramMessageId != null) {
+                            withContext(Dispatchers.IO) {
+                                bot.editMessageText(
+                                    chatId = roomId,
+                                    messageId = editedTelegramMessageId.messageId,
+                                    text = "<${event.sender}> (edited): $textContent",
+                                ).toResult()
                             }
-
-                            is RoomMessageEventContent.FileBased.Image -> {
-                                val caption = when {
-                                    content.fileName == null || content.fileName == content.body ->
-                                        "${event.sender} sent a picture"
-
-                                    else -> "${event.sender}: ${content.body}"
-                                }
-
-                                // encrypted or malformed if null
-                                val url = content.url ?: return
-
-                                downloadMatrixMedia(url) { photoFile ->
-                                    withContext(Dispatchers.IO) {
-                                        bot.sendPhoto(
-                                            chatId = roomId,
-                                            photo = photoFile,
-                                            caption = caption,
-                                        )
-                                    }.toResult()
-                                }
-                            }
-
-                            is RoomMessageEventContent.FileBased.File -> {
-                                val caption = when {
-                                    content.fileName == null || content.fileName == content.body ->
-                                        "${event.sender} sent a file"
-
-                                    else -> "${event.sender}: ${content.body}"
-                                }
-
-                                val url = content.url ?: return
-                                val fileName = (content.fileName ?: content.body).take(255)
-                                    .replace('/', '_')
-                                    .replace('\\', '_')
-
-                                downloadMatrixMedia(url, fileName) { file ->
-                                    withContext(Dispatchers.IO) {
-                                        bot.sendDocument(
-                                            chatId = roomId,
-                                            document = file,
-                                            caption = caption,
-                                        )
-                                    }.toResult()
-                                }
-                            }
-
-                            else -> {
-                                throw UnhandledEventException("This event is not delivered due to lack of support")
-                            }
-                        }
-                        when (result) {
-                            is TelegramBotResult.Success -> {
-                                linkMessageId(MessageId(result.value.messageId))
-                            }
-
-                            is TelegramBotResult.Error -> {
-                                when (result) {
-                                    is TelegramBotResult.Error.HttpError -> throw IOException(
-                                        "HTTP error ${result.httpCode}: ${result.description}",
-                                    )
-
-                                    is TelegramBotResult.Error.TelegramApi -> error(
-                                        "Telegram API error ${result.errorCode}: ${result.description}",
-                                    )
-
-                                    is TelegramBotResult.Error.InvalidResponse -> throw IOException(
-                                        "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}",
-                                    )
-
-                                    is TelegramBotResult.Error.Unknown -> throw result.exception
-                                }
+                        } else {
+                            withContext(Dispatchers.IO) {
+                                bot.sendMessage(
+                                    chatId = roomId,
+                                    text = "<${event.sender}>: $textContent",
+                                )
                             }
                         }
                     }
 
-                    else -> return
+                    is RoomMessageEventContent.FileBased.Image -> {
+                        val caption = when {
+                            content.fileName == null || content.fileName == content.body ->
+                                "${event.sender} sent a picture"
+
+                            else -> "${event.sender}: ${content.body}"
+                        }
+
+                        // encrypted or malformed if null
+                        val url = content.url ?: return
+
+                        downloadMatrixMedia(url) { photoFile ->
+                            withContext(Dispatchers.IO) {
+                                bot.sendPhoto(
+                                    chatId = roomId,
+                                    photo = photoFile,
+                                    caption = caption,
+                                )
+                            }.toResult()
+                        }
+                    }
+
+                    is RoomMessageEventContent.FileBased.File -> {
+                        val caption = when {
+                            content.fileName == null || content.fileName == content.body ->
+                                "${event.sender} sent a file"
+
+                            else -> "${event.sender}: ${content.body}"
+                        }
+
+                        val url = content.url ?: return
+                        val fileName = (content.fileName ?: content.body).take(255)
+                            .replace('/', '_')
+                            .replace('\\', '_')
+
+                        downloadMatrixMedia(url, fileName) { file ->
+                            withContext(Dispatchers.IO) {
+                                bot.sendDocument(
+                                    chatId = roomId,
+                                    document = file,
+                                    caption = caption,
+                                )
+                            }.toResult()
+                        }
+                    }
+
+                    else -> {
+                        throw UnhandledEventException("This event is not delivered due to lack of support")
+                    }
+                }
+                when (result) {
+                    is TelegramBotResult.Success -> {
+                        linkMessageId(MessageId(result.value.messageId))
+                    }
+
+                    is TelegramBotResult.Error -> {
+                        when (result) {
+                            is TelegramBotResult.Error.HttpError -> throw IOException(
+                                "HTTP error ${result.httpCode}: ${result.description}",
+                            )
+
+                            is TelegramBotResult.Error.TelegramApi -> error(
+                                "Telegram API error ${result.errorCode}: ${result.description}",
+                            )
+
+                            is TelegramBotResult.Error.InvalidResponse -> throw IOException(
+                                "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}",
+                            )
+
+                            is TelegramBotResult.Error.Unknown -> throw result.exception
+                        }
+                    }
                 }
             }
 
