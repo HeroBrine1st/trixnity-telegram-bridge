@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
+import net.folivo.trixnity.core.model.events.m.RelatesTo
 import net.folivo.trixnity.core.model.events.m.room.FileInfo
 import net.folivo.trixnity.core.model.events.m.room.ImageInfo
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
@@ -52,18 +53,91 @@ class TelegramWorker(
     ) {
         when (event) {
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
-                when (val content = event.content) {
+                when (val contentRaw = event.content) {
                     is RoomMessageEventContent -> {
+                        val relatesTo = contentRaw.relatesTo
+
+                        val editedTelegramMessageId = when (relatesTo) {
+                            is RelatesTo.Replace -> api.getMessageEventId(relatesTo.eventId)
+                            else -> null
+                        }
+
+                        val content = if (relatesTo is RelatesTo.Replace) {
+                            relatesTo.newContent
+                        } else {
+                            contentRaw
+                        }
+
+                        if (content !is RoomMessageEventContent) {
+                            throw UnhandledEventException(
+                                "The bridge does not support this event because it is not room message event: $content",
+                            )
+                        }
+
+                        if (relatesTo is RelatesTo.Replace) {
+                            val originalEvent = client.room.getEvent(event.roomId, relatesTo.eventId).getOrThrow()
+                            val originalContent = originalEvent.content
+                            if (originalContent !is RoomMessageEventContent) {
+                                throw UnhandledEventException(
+                                    "The edited event (${relatesTo.eventId}) is likely not known to database",
+                                )
+                            }
+
+                            @Suppress("ktlint:standard:max-line-length")
+                            val isTheSame = when (originalContent) {
+                                // avoid reflection at all costs
+                                is RoomMessageEventContent.FileBased.Audio -> content is RoomMessageEventContent.FileBased.Audio
+                                is RoomMessageEventContent.FileBased.File -> content is RoomMessageEventContent.FileBased.File
+                                is RoomMessageEventContent.FileBased.Image -> content is RoomMessageEventContent.FileBased.Image
+                                is RoomMessageEventContent.FileBased.Video -> content is RoomMessageEventContent.FileBased.Video
+                                is RoomMessageEventContent.TextBased.Emote -> content is RoomMessageEventContent.TextBased.Emote
+                                is RoomMessageEventContent.TextBased.Notice -> content is RoomMessageEventContent.TextBased.Notice
+                                is RoomMessageEventContent.TextBased.Text -> content is RoomMessageEventContent.TextBased.Text
+                                is RoomMessageEventContent.Location -> content is RoomMessageEventContent.Location
+                                // are not supported
+                                is RoomMessageEventContent.Unknown -> return
+                                is RoomMessageEventContent.VerificationRequest -> return
+                            }
+
+                            if (!isTheSame) {
+                                throw UnhandledEventException(
+                                    "This event replacement is not sent because Telegram does not support changing message types",
+                                )
+                            }
+                        }
+
                         val bot = getBot(actorId)
+
                         val result = when (content) {
                             is RoomMessageEventContent.TextBased.Text -> {
                                 val textContent = content.body
 
-                                withContext(Dispatchers.IO) {
-                                    bot.sendMessage(
-                                        chatId = roomId,
-                                        text = "<${event.sender}>: $textContent",
-                                    )
+                                if (editedTelegramMessageId != null) {
+                                    val result = withContext(Dispatchers.IO) {
+                                        bot.editMessageText(
+                                            chatId = roomId,
+                                            messageId = editedTelegramMessageId.messageId,
+                                            text = "<${event.sender}>: $textContent",
+                                        ).toResult()
+                                    }
+
+                                    if (result is TelegramBotResult.Error.TelegramApi &&
+                                        result.errorCode == 400 &&
+                                        result.description == "Bad Request: message is not modified: " +
+                                        "specified new message content and reply markup are exactly the same " +
+                                        "as a current content and reply markup of the message"
+                                    ) {
+                                        return
+                                    } else {
+                                        result
+                                    }
+                                } else {
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendMessage(
+                                            chatId = roomId,
+                                            text = "<${event.sender}>: $textContent",
+                                        )
+                                    }
                                 }
                             }
 
