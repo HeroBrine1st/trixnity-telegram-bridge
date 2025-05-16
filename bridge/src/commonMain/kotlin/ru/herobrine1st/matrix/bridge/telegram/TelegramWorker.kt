@@ -6,6 +6,9 @@ import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.types.TelegramBotResult
+import io.ktor.http.ContentDisposition
+import io.ktor.http.ContentType
+import io.ktor.utils.io.jvm.javaio.toByteReadChannel
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -14,6 +17,7 @@ import kotlinx.coroutines.withContext
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
+import net.folivo.trixnity.core.model.events.m.room.ImageInfo
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
 import ru.herobrine1st.matrix.bridge.api.RemoteRoom
@@ -183,12 +187,11 @@ class TelegramWorker(
 
             when (result) {
                 is TelegramBotResult.Success -> {
-                    if (result.value.isEmpty()) continue // Short-circuit empty responses
+                    if (result.value.isEmpty()) continue
                     result.value.forEach { update ->
                         update.message?.let { message ->
                             val (chat, sender, content) = run {
                                 message.text?.let { text ->
-                                    // will likely throw exceptions, but docs say it is null only in channels
                                     val sender = message.from!!
                                     return@run Triple(
                                         message.chat,
@@ -196,7 +199,51 @@ class TelegramWorker(
                                         RoomMessageEventContent.TextBased.Text(body = text),
                                     )
                                 }
-                                return@forEach // TODO respond with unhandled event
+
+                                message.photo?.maxByOrNull { it.fileSize ?: 0 }?.let { photo ->
+
+                                    val sender = message.from!!
+
+                                    val fileInfo = withContext(Dispatchers.IO) {
+                                        bot.getFile(photo.fileId).toResult().get()
+                                    }
+
+                                    val responseBody =
+                                        bot.downloadFile(fileInfo.filePath!!).toResult().get()
+
+                                    val mxcUrl = withContext(Dispatchers.IO) {
+                                        client.media.upload(
+                                            Media(
+                                                content = responseBody.byteStream().toByteReadChannel(),
+                                                contentLength = responseBody.contentLength(),
+                                                contentType = responseBody.contentType()?.let {
+                                                    ContentType(it.type(), it.subtype())
+                                                },
+                                                contentDisposition = ContentDisposition(disposition = "image.jpg"),
+                                            ),
+                                        )
+                                    }.getOrThrow().contentUri
+
+                                    println(message.caption)
+
+                                    return@run Triple(
+                                        message.chat,
+                                        sender,
+                                        RoomMessageEventContent.FileBased.Image(
+                                            fileName = "photo.jpg",
+                                            body = message.caption ?: "photo.jpg",
+                                            url = mxcUrl,
+                                            info = ImageInfo(
+                                                mimeType = "image/jpeg",
+                                                size = photo.fileSize?.toLong(),
+                                                height = null,
+                                                width = null,
+                                            ),
+                                        ),
+                                    )
+                                }
+
+                                return@forEach
                             }
 
                             val userId = UserId(sender.id)
