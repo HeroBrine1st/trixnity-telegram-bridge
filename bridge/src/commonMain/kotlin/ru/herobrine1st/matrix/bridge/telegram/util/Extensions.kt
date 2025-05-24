@@ -7,6 +7,7 @@ import com.google.gson.JsonIOException
 import com.google.gson.TypeAdapter
 import com.google.gson.reflect.TypeToken
 import com.google.gson.stream.JsonToken
+import java.io.IOException
 
 fun <T : Any> Pair<retrofit2.Response<Response<T>?>?, Exception?>.toResult(): TelegramBotResult<T> {
     return when (val res = toResult<Response<T>>()) {
@@ -41,4 +42,15 @@ fun <T : Any> Pair<retrofit2.Response<T?>?, Exception?>.toResult(): TelegramBotR
     }
 
     return TelegramBotResult.Success(apiResponse.body()!!)
+}
+
+fun <T : Any> TelegramBotResult<T>.getOrThrow(): T {
+    when (this) {
+        is TelegramBotResult.Success -> return this.value
+
+        is TelegramBotResult.Error.HttpError -> throw IOException("HTTP error $httpCode: $description")
+        is TelegramBotResult.Error.TelegramApi -> throw TelegramApiException(errorCode, description)
+        is TelegramBotResult.Error.InvalidResponse -> throw IllegalStateException("Got invalid response ($this)")
+        is TelegramBotResult.Error.Unknown -> throw this.exception
+    }
 }
