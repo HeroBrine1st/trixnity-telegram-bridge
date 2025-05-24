@@ -28,6 +28,7 @@ import ru.herobrine1st.matrix.bridge.api.worker.BasicRemoteWorker
 import ru.herobrine1st.matrix.bridge.exception.UnhandledEventException
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.ActorProvisionRepository
 import ru.herobrine1st.matrix.bridge.repository.generic.doublepuppeted.RemoteWorkerRepositorySet
+import ru.herobrine1st.matrix.bridge.telegram.util.getOrThrow
 import ru.herobrine1st.matrix.bridge.telegram.util.toResult
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorData
 import ru.herobrine1st.matrix.bridge.telegram.value.TelegramActorId
@@ -115,29 +116,8 @@ class TelegramWorker(
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
                             }
                         }
-                        when (result) {
-                            is TelegramBotResult.Success -> {
-                                linkMessageId(MessageId(result.value.messageId))
-                            }
 
-                            is TelegramBotResult.Error -> {
-                                when (result) {
-                                    is TelegramBotResult.Error.HttpError -> throw IOException(
-                                        "HTTP error ${result.httpCode}: ${result.description}",
-                                    )
-
-                                    is TelegramBotResult.Error.TelegramApi -> error(
-                                        "Telegram API error ${result.errorCode}: ${result.description}",
-                                    )
-
-                                    is TelegramBotResult.Error.InvalidResponse -> throw IOException(
-                                        "Invalid response (HTTP ${result.httpCode}): ${result.httpStatusMessage}",
-                                    )
-
-                                    is TelegramBotResult.Error.Unknown -> throw result.exception
-                                }
-                            }
-                        }
+                        linkMessageId(MessageId(result.getOrThrow().messageId))
                     }
 
                     else -> return
@@ -205,13 +185,13 @@ class TelegramWorker(
                                     val sender = message.from!!
 
                                     val fileInfo = withContext(Dispatchers.IO) {
-                                        bot.getFile(photo.fileId).toResult().get()
+                                        bot.getFile(photo.fileId).toResult().getOrThrow()
                                     }
 
                                     val caption = message.caption
                                     val responseBody = fileInfo.filePath?.let { filePath ->
                                         withContext(Dispatchers.IO) {
-                                            bot.downloadFile(filePath).toResult().get()
+                                            bot.downloadFile(filePath).toResult().getOrThrow()
                                         }
                                     } ?: return@run Triple(
                                         message.chat,
@@ -285,7 +265,7 @@ class TelegramWorker(
     override suspend fun getUser(actorId: TelegramActorId, id: UserId): RemoteUser<UserId> {
         val bot = getBot(actorId)
         val chatId = ChatId.fromId(id.id)
-        val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).get() }
+        val chat = withContext(Dispatchers.IO) { bot.getChat(chatId).getOrThrow() }
         val displayName = chat.firstName ?: chat.username ?: "Unknown"
         return RemoteUser(
             id = id,
@@ -295,7 +275,7 @@ class TelegramWorker(
 
     override suspend fun getRoom(actorId: TelegramActorId, id: ChatId): RemoteRoom<UserId, ChatId> {
         val bot = getBot(actorId)
-        val chat = withContext(Dispatchers.IO) { bot.getChat(id).get() }
+        val chat = withContext(Dispatchers.IO) { bot.getChat(id).getOrThrow() }
 
         check(chat.type != "channel") { "Can't create room for a channel" }
         check(chat.type != "private") { "Double puppeted bridge does not work with direct messages" }
@@ -313,7 +293,7 @@ class TelegramWorker(
 
         // API Limitation: no access to full list
         val members = withContext(Dispatchers.IO) {
-            bot.getChatAdministrators(remoteId).get()
+            bot.getChatAdministrators(remoteId).getOrThrow()
         }
 
         for (member in members) {
