@@ -181,6 +181,53 @@ class TelegramWorker(
                                     )
                                 }
 
+                                message.document?.let { document ->
+                                    val sender = message.from!!
+
+                                    val fileInfo = withContext(Dispatchers.IO) {
+                                        bot.getFile(document.fileId).toResult().get()
+                                    }
+
+                                    val responseBody = fileInfo.filePath?.let { filePath ->
+                                        withContext(Dispatchers.IO) {
+                                            bot.downloadFile(filePath).toResult().get()
+                                        }
+                                    } ?: return@run Triple(
+                                        message.chat,
+                                        sender,
+                                        RoomMessageEventContent.TextBased.Notice(
+                                            body = "Could not download file. Caption was: ${message.caption}",
+                                        ),
+                                    )
+
+                                    val mxcUrl = client.media.upload(
+                                        Media(
+                                            content = responseBody.byteStream().toByteReadChannel(),
+                                            contentLength = responseBody.contentLength(),
+                                            contentType = responseBody.contentType()?.let {
+                                                ContentType(it.type(), it.subtype())
+                                            },
+                                            contentDisposition = document.fileName?.let { fileName ->
+                                                ContentDisposition.Attachment.withParameter(
+                                                    "filename",
+                                                    fileName,
+                                                )
+                                            },
+                                        ),
+                                    ).getOrThrow().contentUri
+
+                                    return@run Triple(
+                                        message.chat,
+                                        sender,
+                                        RoomMessageEventContent.FileBased.File(
+                                            fileName = document.fileName,
+                                            body = message.caption ?: document.fileName ?: "file",
+                                            url = mxcUrl,
+                                            info = null, // можно дополнить позже, если надо
+                                        ),
+                                    )
+                                }
+
                                 message.photo?.maxByOrNull { it.fileSize ?: 0 }?.let { photo ->
                                     val sender = message.from!!
 
