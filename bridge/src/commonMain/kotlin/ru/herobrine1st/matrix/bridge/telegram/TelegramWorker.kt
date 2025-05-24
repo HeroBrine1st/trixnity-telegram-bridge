@@ -14,9 +14,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonNull.content
 import net.folivo.trixnity.clientserverapi.client.MatrixClientServerApiClient
 import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
+import net.folivo.trixnity.core.model.events.m.RelatesTo
 import net.folivo.trixnity.core.model.events.m.room.ImageInfo
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
@@ -51,18 +53,96 @@ class TelegramWorker(
     ) {
         when (event) {
             is ClientEvent.RoomEvent.MessageEvent<*> -> {
-                when (val content = event.content) {
+                when (val contentRaw = event.content) {
                     is RoomMessageEventContent -> {
+                        val replacement = (contentRaw.relatesTo as? RelatesTo.Replace)?.let {
+                            val messageId = api.getMessageEventId(it.eventId) ?: return@let null
+
+                            val originalEvent = client.room.getEvent(event.roomId, it.eventId).getOrThrow()
+                            val originalContent = originalEvent.content
+                            if (originalContent !is RoomMessageEventContent) {
+                                throw UnhandledEventException(
+                                    "The edited event (${it.eventId}) is likely not known to database",
+                                )
+                            }
+
+                            val newContent = it.newContent
+
+                            if (newContent !is RoomMessageEventContent) {
+                                throw UnhandledEventException(
+                                    "The bridge does not support this event because it is not room message event: $content",
+                                )
+                            }
+
+                            Triple(
+                                messageId,
+                                newContent,
+                                originalContent,
+                            )
+                        }
+
+                        if (replacement != null) {
+                            val (_, newContent, originalContent) = replacement
+
+                            @Suppress("ktlint:standard:max-line-length")
+                            val isTheSame = when (originalContent) {
+                                // avoid reflection at all costs
+                                is RoomMessageEventContent.FileBased.Audio -> newContent is RoomMessageEventContent.FileBased.Audio
+                                is RoomMessageEventContent.FileBased.File -> newContent is RoomMessageEventContent.FileBased.File
+                                is RoomMessageEventContent.FileBased.Image -> newContent is RoomMessageEventContent.FileBased.Image
+                                is RoomMessageEventContent.FileBased.Video -> newContent is RoomMessageEventContent.FileBased.Video
+                                is RoomMessageEventContent.TextBased.Emote -> newContent is RoomMessageEventContent.TextBased.Emote
+                                is RoomMessageEventContent.TextBased.Notice -> newContent is RoomMessageEventContent.TextBased.Notice
+                                is RoomMessageEventContent.TextBased.Text -> newContent is RoomMessageEventContent.TextBased.Text
+                                is RoomMessageEventContent.Location -> newContent is RoomMessageEventContent.Location
+                                // are not supported
+                                is RoomMessageEventContent.Unknown -> return
+                                is RoomMessageEventContent.VerificationRequest -> return
+                            }
+
+                            if (!isTheSame) {
+                                throw UnhandledEventException(
+                                    "This event replacement is not sent because Telegram does not support changing message types",
+                                )
+                            }
+                        }
+
+                        val content = replacement?.second ?: contentRaw
+
                         val bot = getBot(actorId)
+
                         val result = when (content) {
                             is RoomMessageEventContent.TextBased.Text -> {
                                 val textContent = content.body
 
-                                withContext(Dispatchers.IO) {
-                                    bot.sendMessage(
-                                        chatId = roomId,
-                                        text = "<${event.sender}>: $textContent",
-                                    )
+                                if (replacement != null) {
+                                    val (messageId) = replacement
+
+                                    val result = withContext(Dispatchers.IO) {
+                                        bot.editMessageText(
+                                            chatId = roomId,
+                                            messageId = messageId.messageId,
+                                            text = "<${event.sender}>: $textContent",
+                                        ).toResult()
+                                    }
+
+                                    if (result is TelegramBotResult.Error.TelegramApi &&
+                                        result.errorCode == 400 &&
+                                        result.description == "Bad Request: message is not modified: " +
+                                        "specified new message content and reply markup are exactly the same " +
+                                        "as a current content and reply markup of the message"
+                                    ) {
+                                        return
+                                    } else {
+                                        result
+                                    }
+                                } else {
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendMessage(
+                                            chatId = roomId,
+                                            text = "<${event.sender}>: $textContent",
+                                        )
+                                    }
                                 }
                             }
 
