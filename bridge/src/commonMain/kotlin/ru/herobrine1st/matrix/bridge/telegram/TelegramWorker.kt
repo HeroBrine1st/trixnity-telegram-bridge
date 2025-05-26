@@ -5,6 +5,10 @@ import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import com.github.kotlintelegrambot.entities.TelegramFile
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaAudio
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaDocument
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaPhoto
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaVideo
 import com.github.kotlintelegrambot.types.TelegramBotResult
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
@@ -130,6 +134,52 @@ class TelegramWorker(
                                     )
                                 }.getOrThrow().let { (messageId) ->
                                     linkMessageId(MessageId(messageId))
+                                }
+                            }
+
+                            is RoomMessageEventContent.FileBased if replacement != null -> {
+                                val kind = when (content) {
+                                    is RoomMessageEventContent.FileBased.Audio -> "an audio file"
+                                    is RoomMessageEventContent.FileBased.File -> "a file"
+                                    is RoomMessageEventContent.FileBased.Image -> "a picture"
+                                    is RoomMessageEventContent.FileBased.Video -> "a video"
+                                }
+                                val caption = when {
+                                    content.fileName == null || content.fileName == content.body ->
+                                        "${event.sender} sent $kind"
+
+                                    else -> "${event.sender}: ${content.body}"
+                                }
+
+                                downloadMatrixMedia(content) { file ->
+                                    withContext(Dispatchers.IO) {
+                                        bot.editMessageMedia(
+                                            chatId = roomId,
+                                            messageId = replacement.first.messageId,
+                                            media = when (content) {
+                                                is RoomMessageEventContent.FileBased.Audio -> InputMediaAudio(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.File -> InputMediaDocument(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Image -> InputMediaPhoto(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Video -> InputMediaVideo(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+                                            },
+                                            replyMarkup = null,
+                                        ).toResult().ignoreTheSameContentOrThrow()
+                                    }
                                 }
                             }
 
