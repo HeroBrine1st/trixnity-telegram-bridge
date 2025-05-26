@@ -16,6 +16,10 @@ tasks.shadowJar {
 kotlin {
     jvmToolchain(17)
 
+    compilerOptions {
+        freeCompilerArgs.add("-Xwhen-guards")
+    }
+
     jvm()
 
     sourceSets {
