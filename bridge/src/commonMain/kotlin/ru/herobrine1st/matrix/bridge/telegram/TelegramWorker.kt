@@ -78,10 +78,7 @@ class TelegramWorker(
                                     else -> "${event.sender}: ${content.body}"
                                 }
 
-                                // encrypted or malformed if null
-                                val url = content.url ?: return
-
-                                downloadMatrixMedia(url) { photoFile ->
+                                downloadMatrixMedia(content) { photoFile ->
                                     withContext(Dispatchers.IO) {
                                         bot.sendPhoto(
                                             chatId = roomId,
@@ -102,12 +99,7 @@ class TelegramWorker(
                                     else -> "${event.sender}: ${content.body}"
                                 }
 
-                                val url = content.url ?: return
-                                val fileName = (content.fileName ?: content.body).take(255)
-                                    .replace('/', '_')
-                                    .replace('\\', '_')
-
-                                downloadMatrixMedia(url, fileName) { file ->
+                                downloadMatrixMedia(content) { file ->
                                     withContext(Dispatchers.IO) {
                                         bot.sendDocument(
                                             chatId = roomId,
@@ -138,10 +130,13 @@ class TelegramWorker(
 
     @OptIn(ExperimentalPathApi::class)
     private suspend inline fun <T> downloadMatrixMedia(
-        url: String,
-        fileName: String = "file.tmp",
+        content: RoomMessageEventContent.FileBased,
         crossinline block: suspend (TelegramFile) -> T,
     ): T {
+        val url = content.url ?: throw UnhandledEventException("Event content has no url")
+        val fileName = (content.fileName ?: content.body).take(255)
+            .replace('/', '_')
+            .replace('\\', '_')
         return client.media.download(url) { media: Media ->
             val tempFile = createTempDirectory().resolve(fileName)
             try {
