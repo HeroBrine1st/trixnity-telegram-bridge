@@ -5,6 +5,10 @@ import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import com.github.kotlintelegrambot.entities.TelegramFile
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaAudio
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaDocument
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaPhoto
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaVideo
 import com.github.kotlintelegrambot.types.TelegramBotResult
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
@@ -117,22 +121,13 @@ class TelegramWorker(
                                 if (replacement != null) {
                                     val (messageId) = replacement
 
-                                    val result = withContext(Dispatchers.IO) {
+                                    withContext(Dispatchers.IO) {
                                         bot.editMessageText(
                                             chatId = roomId,
                                             messageId = messageId.messageId,
                                             text = "<${event.sender}>: $textContent",
                                         ).toResult()
-                                    }
-
-                                    if (result !is TelegramBotResult.Error.TelegramApi ||
-                                        result.errorCode != 400 ||
-                                        result.description != "Bad Request: message is not modified: " +
-                                        "specified new message content and reply markup are exactly the same " +
-                                        "as a current content and reply markup of the message"
-                                    ) {
-                                        result.getOrThrow()
-                                    }
+                                    }.ignoreTheSameContentOrThrow()
                                 } else {
                                     withContext(Dispatchers.IO) {
                                         bot.sendMessage(
@@ -141,6 +136,52 @@ class TelegramWorker(
                                         )
                                     }.getOrThrow().let { (messageId) ->
                                         linkMessageId(MessageId(messageId))
+                                    }
+                                }
+                            }
+
+                            is RoomMessageEventContent.FileBased if replacement != null -> {
+                                val kind = when (content) {
+                                    is RoomMessageEventContent.FileBased.Audio -> "an audio file"
+                                    is RoomMessageEventContent.FileBased.File -> "a file"
+                                    is RoomMessageEventContent.FileBased.Image -> "a picture"
+                                    is RoomMessageEventContent.FileBased.Video -> "a video"
+                                }
+                                val caption = when {
+                                    content.fileName == null || content.fileName == content.body ->
+                                        "${event.sender} sent $kind"
+
+                                    else -> "${event.sender}: ${content.body}"
+                                }
+
+                                downloadMatrixMedia(content) { file ->
+                                    withContext(Dispatchers.IO) {
+                                        bot.editMessageMedia(
+                                            chatId = roomId,
+                                            messageId = replacement.first.messageId,
+                                            media = when (content) {
+                                                is RoomMessageEventContent.FileBased.Audio -> InputMediaAudio(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.File -> InputMediaDocument(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Image -> InputMediaPhoto(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Video -> InputMediaVideo(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+                                            },
+                                            replyMarkup = null,
+                                        ).toResult().ignoreTheSameContentOrThrow()
                                     }
                                 }
                             }
@@ -433,6 +474,17 @@ class TelegramWorker(
         val actorData = actorProvisionRepository.getActorData(actorId)
         val token = actorData.token
         return bot { this.token = token }
+    }
+
+    private fun TelegramBotResult<*>.ignoreTheSameContentOrThrow() {
+        if (this !is TelegramBotResult.Error.TelegramApi ||
+            errorCode != 400 ||
+            description != "Bad Request: message is not modified: " +
+            "specified new message content and reply markup are exactly the same " +
+            "as a current content and reply markup of the message"
+        ) {
+            getOrThrow()
+        }
     }
 
     class Factory(
