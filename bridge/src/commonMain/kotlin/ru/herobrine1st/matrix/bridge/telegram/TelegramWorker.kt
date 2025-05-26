@@ -115,29 +115,23 @@ class TelegramWorker(
                         val bot = getBot(actorId)
 
                         when (content) {
-                            is RoomMessageEventContent.TextBased.Text -> {
-                                val textContent = content.body
+                            is RoomMessageEventContent.TextBased.Text if replacement != null -> withContext(
+                                Dispatchers.IO,
+                            ) {
+                                bot.editMessageText(
+                                    chatId = roomId,
+                                    messageId = replacement.first.messageId,
+                                    text = "<${event.sender}>: ${content.body}",
+                                ).toResult()
+                            }.ignoreTheSameContentOrThrow()
 
-                                if (replacement != null) {
-                                    val (messageId) = replacement
-
-                                    withContext(Dispatchers.IO) {
-                                        bot.editMessageText(
-                                            chatId = roomId,
-                                            messageId = messageId.messageId,
-                                            text = "<${event.sender}>: $textContent",
-                                        ).toResult()
-                                    }.ignoreTheSameContentOrThrow()
-                                } else {
-                                    withContext(Dispatchers.IO) {
-                                        bot.sendMessage(
-                                            chatId = roomId,
-                                            text = "<${event.sender}>: $textContent",
-                                        )
-                                    }.getOrThrow().let { (messageId) ->
-                                        linkMessageId(MessageId(messageId))
-                                    }
-                                }
+                            is RoomMessageEventContent.TextBased.Text -> withContext(Dispatchers.IO) {
+                                bot.sendMessage(
+                                    chatId = roomId,
+                                    text = "<${event.sender}>: ${content.body}",
+                                )
+                            }.getOrThrow().let { (messageId) ->
+                                linkMessageId(MessageId(messageId))
                             }
 
                             is RoomMessageEventContent.FileBased if replacement != null -> {
