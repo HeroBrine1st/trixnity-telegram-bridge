@@ -110,7 +110,7 @@ class TelegramWorker(
 
                         val bot = getBot(actorId)
 
-                        val result = when (content) {
+                        when (content) {
                             is RoomMessageEventContent.TextBased.Text -> {
                                 val textContent = content.body
 
@@ -125,15 +125,13 @@ class TelegramWorker(
                                         ).toResult()
                                     }
 
-                                    if (result is TelegramBotResult.Error.TelegramApi &&
-                                        result.errorCode == 400 &&
-                                        result.description == "Bad Request: message is not modified: " +
+                                    if (result !is TelegramBotResult.Error.TelegramApi ||
+                                        result.errorCode != 400 ||
+                                        result.description != "Bad Request: message is not modified: " +
                                         "specified new message content and reply markup are exactly the same " +
                                         "as a current content and reply markup of the message"
                                     ) {
-                                        return
-                                    } else {
-                                        result
+                                        result.getOrThrow()
                                     }
                                 } else {
                                     withContext(Dispatchers.IO) {
@@ -141,6 +139,8 @@ class TelegramWorker(
                                             chatId = roomId,
                                             text = "<${event.sender}>: $textContent",
                                         )
+                                    }.getOrThrow().let { (messageId) ->
+                                        linkMessageId(MessageId(messageId))
                                     }
                                 }
                             }
@@ -163,7 +163,9 @@ class TelegramWorker(
                                             photo = photoFile,
                                             caption = caption,
                                         )
-                                    }.toResult()
+                                    }.toResult().getOrThrow().let { (messageId) ->
+                                        linkMessageId(MessageId(messageId))
+                                    }
                                 }
                             }
 
@@ -187,7 +189,9 @@ class TelegramWorker(
                                             document = file,
                                             caption = caption,
                                         )
-                                    }.toResult()
+                                    }.toResult().getOrThrow().let { (messageId) ->
+                                        linkMessageId(MessageId(messageId))
+                                    }
                                 }
                             }
 
@@ -195,8 +199,6 @@ class TelegramWorker(
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
                             }
                         }
-
-                        linkMessageId(MessageId(result.getOrThrow().messageId))
                     }
 
                     else -> return
