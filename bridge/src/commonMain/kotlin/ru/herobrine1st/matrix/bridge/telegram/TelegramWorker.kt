@@ -75,16 +75,6 @@ class TelegramWorker(
                                 )
                             }
 
-                            Triple(
-                                messageId,
-                                newContent,
-                                originalContent,
-                            )
-                        }
-
-                        if (replacement != null) {
-                            val (_, newContent, originalContent) = replacement
-
                             @Suppress("ktlint:standard:max-line-length")
                             val isTheSame = when (originalContent) {
                                 // avoid reflection at all costs
@@ -106,6 +96,14 @@ class TelegramWorker(
                                     "This event replacement is not sent because Telegram does not support changing message types",
                                 )
                             }
+
+                            Pair(
+                                messageId,
+                                newContent,
+                                // Previous replacement can be fetched to optimise caption-only replacements performance
+                                // but trixnity requires `from` token although it is not needed
+                                // spec.matrix.org/v1.14/client-server-api/#get_matrixclientv1roomsroomidrelationseventidreltype
+                            )
                         }
 
                         val content = replacement?.second ?: contentRaw
