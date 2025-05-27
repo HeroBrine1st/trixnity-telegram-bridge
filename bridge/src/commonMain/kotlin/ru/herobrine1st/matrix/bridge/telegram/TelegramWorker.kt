@@ -55,7 +55,8 @@ class TelegramWorker(
                 when (val content = event.content) {
                     is RoomMessageEventContent -> {
                         val bot = getBot(actorId)
-                        val result = when (content) {
+
+                        when (content) {
                             is RoomMessageEventContent.TextBased.Text -> {
                                 val textContent = content.body
 
@@ -64,6 +65,8 @@ class TelegramWorker(
                                         chatId = roomId,
                                         text = "<${event.sender}>: $textContent",
                                     )
+                                }.getOrThrow().let { (messageId) ->
+                                    linkMessageId(MessageId(messageId))
                                 }
                             }
 
@@ -85,7 +88,9 @@ class TelegramWorker(
                                             photo = photoFile,
                                             caption = caption,
                                         )
-                                    }.toResult()
+                                    }.toResult().getOrThrow().let { (messageId) ->
+                                        linkMessageId(MessageId(messageId))
+                                    }
                                 }
                             }
 
@@ -109,7 +114,9 @@ class TelegramWorker(
                                             document = file,
                                             caption = caption,
                                         )
-                                    }.toResult()
+                                    }.toResult().getOrThrow().let { (messageId) ->
+                                        linkMessageId(MessageId(messageId))
+                                    }
                                 }
                             }
 
@@ -117,8 +124,6 @@ class TelegramWorker(
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
                             }
                         }
-
-                        linkMessageId(MessageId(result.getOrThrow().messageId))
                     }
 
                     else -> return
