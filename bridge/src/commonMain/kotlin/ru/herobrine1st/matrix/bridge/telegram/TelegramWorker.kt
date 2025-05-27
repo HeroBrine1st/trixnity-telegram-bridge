@@ -19,6 +19,7 @@ import net.folivo.trixnity.clientserverapi.model.media.Media
 import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.room.FileInfo
 import net.folivo.trixnity.core.model.events.m.room.ImageInfo
+import net.folivo.trixnity.core.model.events.m.room.RedactionEventContent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
 import ru.herobrine1st.matrix.bridge.api.RemoteRoom
@@ -117,8 +118,21 @@ class TelegramWorker(
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
                             }
                         }
-
                         linkMessageId(MessageId(result.getOrThrow().messageId))
+                    }
+
+                    is RedactionEventContent -> {
+                        val redactedEventId = content.redacts
+                        val telegramMessageId = api.getMessageEventId(redactedEventId)!!.messageId
+
+                        try {
+                            getBot(actorId).deleteMessage(chatId = roomId, messageId = telegramMessageId)
+                            println(
+                                "Removed Telegram message $telegramMessageId associated with Matrix event $redactedEventId",
+                            )
+                        } catch (e: Exception) {
+                            println("Error while deleting: ${e.message}")
+                        }
                     }
 
                     else -> return
