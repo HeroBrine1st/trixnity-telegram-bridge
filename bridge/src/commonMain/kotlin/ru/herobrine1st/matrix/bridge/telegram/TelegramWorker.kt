@@ -20,6 +20,7 @@ import net.folivo.trixnity.core.model.events.ClientEvent
 import net.folivo.trixnity.core.model.events.m.RelatesTo
 import net.folivo.trixnity.core.model.events.m.room.FileInfo
 import net.folivo.trixnity.core.model.events.m.room.ImageInfo
+import net.folivo.trixnity.core.model.events.m.room.RedactionEventContent
 import net.folivo.trixnity.core.model.events.m.room.RoomMessageEventContent
 import ru.herobrine1st.matrix.bridge.api.EventHandlerScope
 import ru.herobrine1st.matrix.bridge.api.RemoteRoom
@@ -187,6 +188,32 @@ class TelegramWorker(
 
                             else -> {
                                 throw UnhandledEventException("This event is not delivered due to lack of support")
+                            }
+                        }
+                    }
+
+                    is RedactionEventContent -> {
+                        val messageId = api.getMessageEventId(contentRaw.redacts) ?: return
+
+                        val bot = getBot(actorId)
+
+                        withContext(Dispatchers.IO) {
+                            val res = bot.deleteMessage(roomId, messageId.messageId)
+                            when (res) {
+                                // idempotency
+                                is TelegramBotResult.Error.TelegramApi
+                                if res.description == "Bad Request: message to delete not found" -> {}
+                                // - too old message
+                                // - bot can't delete another's message
+                                // (API does not differentiate between those two cases)
+                                is TelegramBotResult.Error.TelegramApi
+                                if res.description == "Bad Request: message can't be deleted" -> {
+                                    throw UnhandledEventException(
+                                        "Could not replicate this redaction. Message is likely too old or bot has no permissions to delete messages it did not send",
+                                    )
+                                }
+
+                                else -> res.getOrThrow()
                             }
                         }
                     }
