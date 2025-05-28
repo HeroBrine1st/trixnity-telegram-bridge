@@ -5,6 +5,10 @@ import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.MessageId
 import com.github.kotlintelegrambot.entities.TelegramFile
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaAudio
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaDocument
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaPhoto
+import com.github.kotlintelegrambot.entities.inputmedia.InputMediaVideo
 import com.github.kotlintelegrambot.types.TelegramBotResult
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
@@ -133,15 +137,58 @@ class TelegramWorker(
                                 }
                             }
 
+                            is RoomMessageEventContent.FileBased if replacement != null -> {
+                                val kind = when (content) {
+                                    is RoomMessageEventContent.FileBased.Audio -> "an audio file"
+                                    is RoomMessageEventContent.FileBased.File -> "a file"
+                                    is RoomMessageEventContent.FileBased.Image -> "a picture"
+                                    is RoomMessageEventContent.FileBased.Video -> "a video"
+                                }
+                                val caption = when {
+                                    content.fileName == null || content.fileName == content.body ->
+                                        "${event.sender} sent $kind"
+
+                                    else -> "${event.sender}: ${content.body}"
+                                }
+
+                                downloadMatrixMedia(content) { file ->
+                                    withContext(Dispatchers.IO) {
+                                        bot.editMessageMedia(
+                                            chatId = roomId,
+                                            messageId = replacement.first.messageId,
+                                            media = when (content) {
+                                                is RoomMessageEventContent.FileBased.Audio -> InputMediaAudio(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.File -> InputMediaDocument(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Image -> InputMediaPhoto(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+
+                                                is RoomMessageEventContent.FileBased.Video -> InputMediaVideo(
+                                                    media = file,
+                                                    caption = caption,
+                                                )
+                                            },
+                                            replyMarkup = null,
+                                        ).toResult().ignoreTheSameContentOrThrow()
+                                    }
+                                }
+                            }
+
                             is RoomMessageEventContent.FileBased.Image -> {
                                 val caption = when {
                                     content.fileName == null || content.fileName == content.body ->
-                                        if (replacement == null) "${event.sender} sent a picture"
-                                        else "${event.sender} replaced a picture or removed its caption"
+                                        "${event.sender} sent a picture"
 
-                                    else ->
-                                        if (replacement == null) "${event.sender}: ${content.body}"
-                                        else "${event.sender} (edit): ${content.body}"
+                                    else -> "${event.sender}: ${content.body}"
                                 }
 
                                 downloadMatrixMedia(content) { photoFile ->
@@ -150,9 +197,6 @@ class TelegramWorker(
                                             chatId = roomId,
                                             photo = photoFile,
                                             caption = caption,
-                                            // editMessageMedia endpoint fails, so reply is used as a workaround
-                                            // exploiting the fact that replacement event is not canonical
-                                            replyToMessageId = replacement?.first?.messageId,
                                         )
                                     }.toResult().getOrThrow().let { (messageId) ->
                                         linkMessageId(MessageId(messageId))
@@ -163,12 +207,9 @@ class TelegramWorker(
                             is RoomMessageEventContent.FileBased.File -> {
                                 val caption = when {
                                     content.fileName == null || content.fileName == content.body ->
-                                        if (replacement == null) "${event.sender} sent a file"
-                                        else "${event.sender} replaced a file or removed its caption"
+                                        "${event.sender} sent a file"
 
-                                    else ->
-                                        if (replacement == null) "${event.sender}: ${content.body}"
-                                        else "${event.sender} (edit): ${content.body}"
+                                    else -> "${event.sender}: ${content.body}"
                                 }
 
                                 downloadMatrixMedia(content) { file ->
@@ -177,7 +218,6 @@ class TelegramWorker(
                                             chatId = roomId,
                                             document = file,
                                             caption = caption,
-                                            replyToMessageId = replacement?.first?.messageId,
                                         )
                                     }.toResult().getOrThrow().let { (messageId) ->
                                         linkMessageId(MessageId(messageId))
