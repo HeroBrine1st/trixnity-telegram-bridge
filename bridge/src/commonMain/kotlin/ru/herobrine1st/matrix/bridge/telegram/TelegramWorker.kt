@@ -322,9 +322,18 @@ class TelegramWorker(
                                     return@forEach
                                 }
 
+                                val relation = if (!isReplacement) message.replyToMessage?.messageId
+                                    ?.let { api.getMessageEventId(MessageId(it)) }
+                                    ?.let { eventId ->
+                                        RelatesTo.Reply(RelatesTo.ReplyTo(eventId))
+                                    } else null
+
                                 val rawContent = run {
                                     message.text?.let { text ->
-                                        return@run RoomMessageEventContent.TextBased.Text(body = text)
+                                        return@run RoomMessageEventContent.TextBased.Text(
+                                            body = text,
+                                            relatesTo = relation,
+                                        )
                                     }
 
                                     message.document?.let { document ->
@@ -338,6 +347,7 @@ class TelegramWorker(
                                             }
                                         } ?: return@run RoomMessageEventContent.TextBased.Notice(
                                             body = "Could not download file. Caption was: ${message.caption}",
+                                            relatesTo = relation,
                                         )
 
                                         val mxcUrl = client.media.upload(
@@ -364,6 +374,7 @@ class TelegramWorker(
                                                 mimeType = document.mimeType,
                                                 size = document.fileSize?.toLong(),
                                             ),
+                                            relatesTo = relation,
                                         )
                                     }
 
@@ -379,6 +390,7 @@ class TelegramWorker(
                                             }
                                         } ?: return@run RoomMessageEventContent.TextBased.Notice(
                                             body = "Could not download photo. Caption was: $caption",
+                                            relatesTo = relation,
                                         )
 
                                         val mxcUrl = client.media.upload(
@@ -405,9 +417,14 @@ class TelegramWorker(
                                                 height = photo.height,
                                                 width = photo.width,
                                             ),
+                                            relatesTo = relation,
                                         )
                                     }
                                     return@forEach // TODO respond with unhandled event
+                                }
+
+                                check(rawContent.relatesTo == relation) {
+                                    "Relation is not included into resulting event content. Expected $relation, got ${rawContent.relatesTo}"
                                 }
 
                                 val content = if (isReplacement) RoomMessageEventContent.TextBased.Text(
