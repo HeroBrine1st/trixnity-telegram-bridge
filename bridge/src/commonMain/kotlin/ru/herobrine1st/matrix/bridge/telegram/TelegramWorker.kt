@@ -282,143 +282,153 @@ class TelegramWorker(
                 is TelegramBotResult.Success -> {
                     if (result.value.isEmpty()) continue // Short-circuit empty responses
                     result.value.forEach { update ->
-                        update.message?.let { message ->
-                            // will likely throw exceptions, but docs say message.from is null only in channels
-                            val userId = UserId(message.from!!.id)
-                            val messageId = MessageId(message.messageId)
-                            val chatId = ChatId.fromId(message.chat.id)
+                        (update.message?.let { it to false } ?: update.editedMessage?.let { it to true })
+                            ?.let { (message, isReplacement) ->
+                                // will likely throw exceptions, but docs say message.from is null only in channels
+                                val userId = UserId(message.from!!.id)
+                                val messageId = MessageId(message.messageId)
+                                val chatId = ChatId.fromId(message.chat.id)
 
-                            if (!api.isRoomBridged(chatId)) {
-                                // Handling commands here
-                                val text = message.text ?: return@forEach
-                                if (text.startsWith("/start")) {
-                                    withContext(Dispatchers.IO) {
-                                        bot.sendMessage(
-                                            chatId,
-                                            "Use /bridge <fully qualified matrix user id> to create new bridged room on matrix side",
-                                        ).getOrThrow()
-                                    }
-                                } else if (text.startsWith("/bridge ")) {
-                                    // TODO validate from matrix side - probably a feature for trixnity-bridge
-                                    val userId = MxUserId(text.substringAfter("/bridge "))
-                                    if (userId != MxUserId(userId.localpart, userId.domain)) {
+                                if (!api.isRoomBridged(chatId)) {
+                                    // Handling commands here
+                                    val text = message.text ?: return@forEach
+                                    if (text.startsWith("/start")) {
                                         withContext(Dispatchers.IO) {
-                                            bot.sendMessage(chatId, "User ID is not valid").getOrThrow()
+                                            bot.sendMessage(
+                                                chatId,
+                                                "Use /bridge <fully qualified matrix user id> to create new bridged room on matrix side",
+                                            ).getOrThrow()
                                         }
-                                        return@forEach
-                                    }
-                                    emit(
-                                        BasicRemoteWorker.Event.Remote.Room.Create(
-                                            chatId,
-                                            roomData = getRoom(actorId, chatId).copy(realMembers = setOf(userId)),
-                                        ),
-                                    )
-                                    withContext(Dispatchers.IO) {
-                                        bot.sendMessage(chatId, "Complete! Look for invite on matrix side").getOrThrow()
-                                    }
-                                }
-
-                                return@forEach
-                            }
-
-                            val content = run {
-                                message.text?.let { text ->
-                                    return@run RoomMessageEventContent.TextBased.Text(body = text)
-                                }
-
-                                message.document?.let { document ->
-                                    val fileInfo = withContext(Dispatchers.IO) {
-                                        bot.getFile(document.fileId).toResult().get()
-                                    }
-
-                                    val responseBody = fileInfo.filePath?.let { filePath ->
-                                        withContext(Dispatchers.IO) {
-                                            bot.downloadFile(filePath).toResult().get()
+                                    } else if (text.startsWith("/bridge ")) {
+                                        // TODO validate from matrix side - probably a feature for trixnity-bridge
+                                        val userId = MxUserId(text.substringAfter("/bridge "))
+                                        if (userId != MxUserId(userId.localpart, userId.domain)) {
+                                            withContext(Dispatchers.IO) {
+                                                bot.sendMessage(chatId, "User ID is not valid").getOrThrow()
+                                            }
+                                            return@forEach
                                         }
-                                    } ?: return@run RoomMessageEventContent.TextBased.Notice(
-                                        body = "Could not download file. Caption was: ${message.caption}",
-                                    )
-
-                                    val mxcUrl = client.media.upload(
-                                        Media(
-                                            content = responseBody.byteStream().toByteReadChannel(),
-                                            contentLength = responseBody.contentLength(),
-                                            contentType = responseBody.contentType()?.let {
-                                                ContentType(it.type(), it.subtype())
-                                            },
-                                            contentDisposition = document.fileName?.let { fileName ->
-                                                ContentDisposition.Attachment.withParameter(
-                                                    "filename",
-                                                    fileName,
-                                                )
-                                            },
-                                        ),
-                                    ).getOrThrow().contentUri
-
-                                    return@run RoomMessageEventContent.FileBased.File(
-                                        fileName = document.fileName,
-                                        body = message.caption ?: document.fileName ?: "file",
-                                        url = mxcUrl,
-                                        info = FileInfo(
-                                            mimeType = document.mimeType,
-                                            size = document.fileSize?.toLong(),
-                                        ),
-                                    )
-                                }
-
-                                message.photo?.maxByOrNull { it.fileSize ?: 0 }?.let { photo ->
-                                    val fileInfo = withContext(Dispatchers.IO) {
-                                        bot.getFile(photo.fileId).toResult().getOrThrow()
-                                    }
-
-                                    val caption = message.caption
-                                    val responseBody = fileInfo.filePath?.let { filePath ->
-                                        withContext(Dispatchers.IO) {
-                                            bot.downloadFile(filePath).toResult().getOrThrow()
-                                        }
-                                    } ?: return@run RoomMessageEventContent.TextBased.Notice(
-                                        body = "Could not download photo. Caption was: $caption",
-                                    )
-
-                                    val mxcUrl = client.media.upload(
-                                        Media(
-                                            content = responseBody.byteStream().toByteReadChannel(),
-                                            contentLength = responseBody.contentLength(),
-                                            contentType = responseBody.contentType()?.let {
-                                                ContentType(it.type(), it.subtype())
-                                            },
-                                            contentDisposition = ContentDisposition.Attachment.withParameter(
-                                                "filename",
-                                                "image.jpg",
+                                        emit(
+                                            BasicRemoteWorker.Event.Remote.Room.Create(
+                                                chatId,
+                                                roomData = getRoom(actorId, chatId).copy(realMembers = setOf(userId)),
                                             ),
-                                        ),
-                                    ).getOrThrow().contentUri
+                                        )
+                                        withContext(Dispatchers.IO) {
+                                            bot.sendMessage(chatId, "Complete! Look for invite on matrix side").getOrThrow()
+                                        }
+                                    }
 
-                                    return@run RoomMessageEventContent.FileBased.Image(
-                                        fileName = "photo.jpg",
-                                        body = caption ?: "photo.jpg",
-                                        url = mxcUrl,
-                                        info = ImageInfo(
-                                            mimeType = "image/jpeg",
-                                            size = photo.fileSize?.toLong(),
-                                            height = photo.height,
-                                            width = photo.width,
-                                        ),
-                                    )
+                                    return@forEach
                                 }
-                                return@forEach // TODO respond with unhandled event
-                            }
 
-                            emit(
-                                BasicRemoteWorker.Event.Remote.Room.Message(
-                                    roomId = chatId,
-                                    eventId = RemoteEventId(update.updateId.toString()),
-                                    sender = userId,
-                                    content = content,
-                                    messageId = messageId,
-                                ),
-                            )
-                        }
+                                val rawContent = run {
+                                    message.text?.let { text ->
+                                        return@run RoomMessageEventContent.TextBased.Text(body = text)
+                                    }
+
+                                    message.document?.let { document ->
+                                        val fileInfo = withContext(Dispatchers.IO) {
+                                            bot.getFile(document.fileId).toResult().get()
+                                        }
+
+                                        val responseBody = fileInfo.filePath?.let { filePath ->
+                                            withContext(Dispatchers.IO) {
+                                                bot.downloadFile(filePath).toResult().get()
+                                            }
+                                        } ?: return@run RoomMessageEventContent.TextBased.Notice(
+                                            body = "Could not download file. Caption was: ${message.caption}",
+                                        )
+
+                                        val mxcUrl = client.media.upload(
+                                            Media(
+                                                content = responseBody.byteStream().toByteReadChannel(),
+                                                contentLength = responseBody.contentLength(),
+                                                contentType = responseBody.contentType()?.let {
+                                                    ContentType(it.type(), it.subtype())
+                                                },
+                                                contentDisposition = document.fileName?.let { fileName ->
+                                                    ContentDisposition.Attachment.withParameter(
+                                                        "filename",
+                                                        fileName,
+                                                    )
+                                                },
+                                            ),
+                                        ).getOrThrow().contentUri
+
+                                        return@run RoomMessageEventContent.FileBased.File(
+                                            fileName = document.fileName,
+                                            body = message.caption ?: document.fileName ?: "file",
+                                            url = mxcUrl,
+                                            info = FileInfo(
+                                                mimeType = document.mimeType,
+                                                size = document.fileSize?.toLong(),
+                                            ),
+                                        )
+                                    }
+
+                                    message.photo?.maxByOrNull { it.fileSize ?: 0 }?.let { photo ->
+                                        val fileInfo = withContext(Dispatchers.IO) {
+                                            bot.getFile(photo.fileId).toResult().getOrThrow()
+                                        }
+
+                                        val caption = message.caption
+                                        val responseBody = fileInfo.filePath?.let { filePath ->
+                                            withContext(Dispatchers.IO) {
+                                                bot.downloadFile(filePath).toResult().getOrThrow()
+                                            }
+                                        } ?: return@run RoomMessageEventContent.TextBased.Notice(
+                                            body = "Could not download photo. Caption was: $caption",
+                                        )
+
+                                        val mxcUrl = client.media.upload(
+                                            Media(
+                                                content = responseBody.byteStream().toByteReadChannel(),
+                                                contentLength = responseBody.contentLength(),
+                                                contentType = responseBody.contentType()?.let {
+                                                    ContentType(it.type(), it.subtype())
+                                                },
+                                                contentDisposition = ContentDisposition.Attachment.withParameter(
+                                                    "filename",
+                                                    "image.jpg",
+                                                ),
+                                            ),
+                                        ).getOrThrow().contentUri
+
+                                        return@run RoomMessageEventContent.FileBased.Image(
+                                            fileName = "photo.jpg",
+                                            body = caption ?: "photo.jpg",
+                                            url = mxcUrl,
+                                            info = ImageInfo(
+                                                mimeType = "image/jpeg",
+                                                size = photo.fileSize?.toLong(),
+                                                height = photo.height,
+                                                width = photo.width,
+                                            ),
+                                        )
+                                    }
+                                    return@forEach // TODO respond with unhandled event
+                                }
+
+                                val content = if (isReplacement) RoomMessageEventContent.TextBased.Text(
+                                    body = "* ${rawContent.body}", // spec does not mention requirements on outer fields
+                                    relatesTo = RelatesTo.Replace(
+                                        api.getMessageEventId(MessageId(message.messageId))
+                                            ?: return@forEach, // ignore events created before bridging
+                                        newContent = rawContent,
+                                    ),
+                                ) else rawContent
+
+                                emit(
+                                    BasicRemoteWorker.Event.Remote.Room.Message(
+                                        roomId = chatId,
+                                        eventId = RemoteEventId(update.updateId.toString()),
+                                        sender = userId,
+                                        content = content,
+                                        messageId = if (!isReplacement) messageId else null,
+                                    ),
+                                )
+                            }
                     }
                     offset = result.value.last().updateId + 1
                 }
