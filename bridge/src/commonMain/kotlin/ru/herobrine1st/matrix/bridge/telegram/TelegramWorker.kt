@@ -282,20 +282,17 @@ class TelegramWorker(
                     if (result.value.isEmpty()) continue // Short-circuit empty responses
                     result.value.forEach { update ->
                         update.message?.let { message ->
-                            val (chat, sender, content) = run {
+                            // will likely throw exceptions, but docs say message.from is null only in channels
+                            val userId = UserId(message.from!!.id)
+                            val messageId = MessageId(message.messageId)
+                            val chatId = ChatId.fromId(message.chat.id)
+
+                            val content = run {
                                 message.text?.let { text ->
-                                    // will likely throw exceptions, but docs say it is null only in channels
-                                    val sender = message.from!!
-                                    return@run Triple(
-                                        message.chat,
-                                        sender,
-                                        RoomMessageEventContent.TextBased.Text(body = text),
-                                    )
+                                    return@run RoomMessageEventContent.TextBased.Text(body = text)
                                 }
 
                                 message.document?.let { document ->
-                                    val sender = message.from!!
-
                                     val fileInfo = withContext(Dispatchers.IO) {
                                         bot.getFile(document.fileId).toResult().get()
                                     }
@@ -304,12 +301,8 @@ class TelegramWorker(
                                         withContext(Dispatchers.IO) {
                                             bot.downloadFile(filePath).toResult().get()
                                         }
-                                    } ?: return@run Triple(
-                                        message.chat,
-                                        sender,
-                                        RoomMessageEventContent.TextBased.Notice(
-                                            body = "Could not download file. Caption was: ${message.caption}",
-                                        ),
+                                    } ?: return@run RoomMessageEventContent.TextBased.Notice(
+                                        body = "Could not download file. Caption was: ${message.caption}",
                                     )
 
                                     val mxcUrl = client.media.upload(
@@ -328,24 +321,18 @@ class TelegramWorker(
                                         ),
                                     ).getOrThrow().contentUri
 
-                                    return@run Triple(
-                                        message.chat,
-                                        sender,
-                                        RoomMessageEventContent.FileBased.File(
-                                            fileName = document.fileName,
-                                            body = message.caption ?: document.fileName ?: "file",
-                                            url = mxcUrl,
-                                            info = FileInfo(
-                                                mimeType = document.mimeType,
-                                                size = document.fileSize?.toLong(),
-                                            ),
+                                    return@run RoomMessageEventContent.FileBased.File(
+                                        fileName = document.fileName,
+                                        body = message.caption ?: document.fileName ?: "file",
+                                        url = mxcUrl,
+                                        info = FileInfo(
+                                            mimeType = document.mimeType,
+                                            size = document.fileSize?.toLong(),
                                         ),
                                     )
                                 }
 
                                 message.photo?.maxByOrNull { it.fileSize ?: 0 }?.let { photo ->
-                                    val sender = message.from!!
-
                                     val fileInfo = withContext(Dispatchers.IO) {
                                         bot.getFile(photo.fileId).toResult().getOrThrow()
                                     }
@@ -355,12 +342,8 @@ class TelegramWorker(
                                         withContext(Dispatchers.IO) {
                                             bot.downloadFile(filePath).toResult().getOrThrow()
                                         }
-                                    } ?: return@run Triple(
-                                        message.chat,
-                                        sender,
-                                        RoomMessageEventContent.TextBased.Notice(
-                                            body = "Could not download photo. Caption was: $caption",
-                                        ),
+                                    } ?: return@run RoomMessageEventContent.TextBased.Notice(
+                                        body = "Could not download photo. Caption was: $caption",
                                     )
 
                                     val mxcUrl = client.media.upload(
@@ -377,28 +360,20 @@ class TelegramWorker(
                                         ),
                                     ).getOrThrow().contentUri
 
-                                    return@run Triple(
-                                        message.chat,
-                                        sender,
-                                        RoomMessageEventContent.FileBased.Image(
-                                            fileName = "photo.jpg",
-                                            body = caption ?: "photo.jpg",
-                                            url = mxcUrl,
-                                            info = ImageInfo(
-                                                mimeType = "image/jpeg",
-                                                size = photo.fileSize?.toLong(),
-                                                height = photo.height,
-                                                width = photo.width,
-                                            ),
+                                    return@run RoomMessageEventContent.FileBased.Image(
+                                        fileName = "photo.jpg",
+                                        body = caption ?: "photo.jpg",
+                                        url = mxcUrl,
+                                        info = ImageInfo(
+                                            mimeType = "image/jpeg",
+                                            size = photo.fileSize?.toLong(),
+                                            height = photo.height,
+                                            width = photo.width,
                                         ),
                                     )
                                 }
                                 return@forEach // TODO respond with unhandled event
                             }
-
-                            val userId = UserId(sender.id)
-                            val messageId = MessageId(message.messageId)
-                            val chatId = ChatId.fromId(chat.id)
 
                             emit(
                                 BasicRemoteWorker.Event.Remote.Room.Message(
