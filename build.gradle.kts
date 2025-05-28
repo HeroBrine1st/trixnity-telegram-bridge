@@ -21,6 +21,7 @@ allprojects {
                 .editorConfigOverride(mapOf(
                     "ktlint_code_style" to "intellij_idea",
                     "ktlint_standard_function-expression-body" to "disabled",
+                    "ktlint_standard_multiline-if-else" to "disabled",
                 ))
         }
     }
