@@ -41,6 +41,7 @@ import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.outputStream
+import net.folivo.trixnity.core.model.UserId as MxUserId
 
 class TelegramWorker(
     private val actorProvisionRepository: ActorProvisionRepository<TelegramActorId, TelegramActorData>,
@@ -286,6 +287,39 @@ class TelegramWorker(
                             val userId = UserId(message.from!!.id)
                             val messageId = MessageId(message.messageId)
                             val chatId = ChatId.fromId(message.chat.id)
+
+                            if (!api.isRoomBridged(chatId)) {
+                                // Handling commands here
+                                val text = message.text ?: return@forEach
+                                if (text.startsWith("/start")) {
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendMessage(
+                                            chatId,
+                                            "Use /bridge <fully qualified matrix user id> to create new bridged room on matrix side",
+                                        ).getOrThrow()
+                                    }
+                                } else if (text.startsWith("/bridge ")) {
+                                    // TODO validate from matrix side - probably a feature for trixnity-bridge
+                                    val userId = MxUserId(text.substringAfter("/bridge "))
+                                    if (userId != MxUserId(userId.localpart, userId.domain)) {
+                                        withContext(Dispatchers.IO) {
+                                            bot.sendMessage(chatId, "User ID is not valid").getOrThrow()
+                                        }
+                                        return@forEach
+                                    }
+                                    emit(
+                                        BasicRemoteWorker.Event.Remote.Room.Create(
+                                            chatId,
+                                            roomData = getRoom(actorId, chatId).copy(realMembers = setOf(userId)),
+                                        ),
+                                    )
+                                    withContext(Dispatchers.IO) {
+                                        bot.sendMessage(chatId, "Complete! Look for invite on matrix side").getOrThrow()
+                                    }
+                                }
+
+                                return@forEach
+                            }
 
                             val content = run {
                                 message.text?.let { text ->
