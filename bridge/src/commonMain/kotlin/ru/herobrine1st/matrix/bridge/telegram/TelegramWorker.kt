@@ -106,6 +106,14 @@ class TelegramWorker(
                             )
                         }
 
+                        val replyTo = (contentRaw.relatesTo as? RelatesTo.Reply)?.replyTo?.let {
+                            api.getMessageEventId(it.eventId)
+                        }
+
+                        check(replacement == null || replyTo == null) {
+                            "Replacement event is never canonical: replyTo is not null"
+                        }
+
                         val content = replacement?.second ?: contentRaw
 
                         val bot = getBot(actorId)
@@ -128,6 +136,7 @@ class TelegramWorker(
                                     bot.sendMessage(
                                         chatId = roomId,
                                         text = "<${event.sender}>: $textContent",
+                                        replyToMessageId = replyTo?.messageId,
                                     )
                                 }.getOrThrow().let { (messageId) ->
                                     linkMessageId(MessageId(messageId))
@@ -153,7 +162,8 @@ class TelegramWorker(
                                             caption = caption,
                                             // editMessageMedia endpoint fails, so reply is used as a workaround
                                             // exploiting the fact that replacement event is not canonical
-                                            replyToMessageId = replacement?.first?.messageId,
+                                            replyToMessageId = replacement?.first?.messageId
+                                                ?: replyTo?.messageId,
                                         )
                                     }.toResult().getOrThrow().let { (messageId) ->
                                         linkMessageId(MessageId(messageId))
@@ -178,7 +188,8 @@ class TelegramWorker(
                                             chatId = roomId,
                                             document = file,
                                             caption = caption,
-                                            replyToMessageId = replacement?.first?.messageId,
+                                            replyToMessageId = replacement?.first?.messageId
+                                                ?: replyTo?.messageId,
                                         )
                                     }.toResult().getOrThrow().let { (messageId) ->
                                         linkMessageId(MessageId(messageId))
