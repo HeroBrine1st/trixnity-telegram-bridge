@@ -315,7 +315,10 @@ class TelegramWorker(
                                             ),
                                         )
                                         withContext(Dispatchers.IO) {
-                                            bot.sendMessage(chatId, "Complete! Look for invite on matrix side").getOrThrow()
+                                            bot.sendMessage(
+                                                chatId,
+                                                "Complete! Look for invite on matrix side",
+                                            ).getOrThrow()
                                         }
                                     }
 
